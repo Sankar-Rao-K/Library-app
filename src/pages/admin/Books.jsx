@@ -5,25 +5,21 @@ import { listenToBooks, addBook, addBooksBatch } from "../../firebase/firestore"
 
 const EMPTY = { title: "", author: "", barcode: "", subject: "", totalCopies: 1 };
 
-// ── Parse books from workbook ─────────────────────────────────────────
 function parseBooks(workbook) {
   const results = [];
   workbook.SheetNames.forEach((sheetName) => {
     if (sheetName === "Sheet3") return;
+    const isBB = sheetName.toLowerCase().includes("bb");
     const ws = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
-
     let cols = { accession: -1, author: -1, title: -1, subject: -1 };
     let headerIdx = -1;
-
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i].map((c) => (c ? String(c).trim() : ""));
       const accCol = row.findIndex((c) => c.toLowerCase().includes("accession"));
       const titleCol = row.findIndex((c) => c.toLowerCase().includes("title"));
       const authorCol = row.findIndex((c) => c.toLowerCase().includes("author"));
-      const subjCol = row.findIndex((c) =>
-        c.toLowerCase().includes("subject") || c.toLowerCase().includes("branch")
-      );
+      const subjCol = row.findIndex((c) => c.toLowerCase().includes("subject") || c.toLowerCase().includes("branch"));
       if (accCol !== -1 && titleCol !== -1) {
         headerIdx = i;
         cols = { accession: accCol, author: authorCol, title: titleCol, subject: subjCol };
@@ -31,19 +27,15 @@ function parseBooks(workbook) {
       }
     }
     if (headerIdx === -1) return;
-
     for (let i = headerIdx + 1; i < rows.length; i++) {
       const row = rows[i];
       if (!row || row.every((c) => !c)) continue;
-
       const accession = row[cols.accession];
       const title = row[cols.title];
       const author = cols.author !== -1 ? row[cols.author] : "";
       const subject = cols.subject !== -1 ? row[cols.subject] : "";
-
       if (!title || String(title).trim().length <= 1) continue;
       if (!accession) continue;
-
       const barcode = String(accession).trim();
       results.push({
         accessionNo: barcode,
@@ -54,19 +46,34 @@ function parseBooks(workbook) {
         genre: subject ? String(subject).trim() : "General",
         available: true,
         totalCopies: 1,
+        isBB,
+        catalogue: isBB ? "BB Catalogue" : "Main Catalogue",
       });
     }
   });
   return results;
 }
 
-// ── Main Component ────────────────────────────────────────────────────
+// Group books: BB separately, others by subject
+function groupBooks(books) {
+  const bbBooks = books.filter((b) => b.isBB);
+  const mainBooks = books.filter((b) => !b.isBB);
+  const bySubject = {};
+  mainBooks.forEach((b) => {
+    const key = b.subject || "General";
+    if (!bySubject[key]) bySubject[key] = [];
+    bySubject[key].push(b);
+  });
+  return { bySubject, bbBooks };
+}
+
 export default function Books() {
   const [books, setBooks] = useState([]);
   const [form, setForm] = useState(EMPTY);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [showBB, setShowBB] = useState(true);
 
   // Import state
   const [showImport, setShowImport] = useState(false);
@@ -87,12 +94,9 @@ export default function Books() {
     e.preventDefault();
     setLoading(true);
     try {
-      await addBook({ ...form, totalCopies: Number(form.totalCopies), available: true });
-      setForm(EMPTY);
-      setShowForm(false);
-    } catch (err) {
-      alert("Error: " + err.message);
-    }
+      await addBook({ ...form, totalCopies: Number(form.totalCopies), available: true, isBB: false, catalogue: "Main Catalogue" });
+      setForm(EMPTY); setShowForm(false);
+    } catch (err) { alert("Error: " + err.message); }
     setLoading(false);
   };
 
@@ -107,20 +111,14 @@ export default function Books() {
     if (!file) return;
     setImportError(""); setPreview(null); setImportDone(false);
     setImportFile(file.name);
-
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
         const wb = XLSX.read(ev.target.result, { type: "array" });
         const rows = parseBooks(wb);
-        if (rows.length === 0) {
-          setImportError("No valid records found. Check your file format.");
-          return;
-        }
+        if (rows.length === 0) { setImportError("No valid records found."); return; }
         setPreview(rows);
-      } catch (err) {
-        setImportError("Failed to parse: " + err.message);
-      }
+      } catch (err) { setImportError("Failed to parse: " + err.message); }
     };
     reader.readAsArrayBuffer(file);
   };
@@ -129,11 +127,8 @@ export default function Books() {
     setImportSaving(true);
     try {
       await addBooksBatch(preview);
-      setImportDone(true);
-      setPreview(null);
-    } catch (err) {
-      setImportError("Import failed: " + err.message);
-    }
+      setImportDone(true); setPreview(null);
+    } catch (err) { setImportError("Import failed: " + err.message); }
     setImportSaving(false);
   };
 
@@ -141,38 +136,41 @@ export default function Books() {
     (b) =>
       b.title?.toLowerCase().includes(search.toLowerCase()) ||
       b.author?.toLowerCase().includes(search.toLowerCase()) ||
-      b.barcode?.includes(search) ||
+      String(b.barcode || b.accessionNo || "").toLowerCase().includes(search.toLowerCase()) ||
       b.subject?.toLowerCase().includes(search.toLowerCase())
   );
+
+  const { bySubject, bbBooks } = groupBooks(filtered);
+  const subjectKeys = Object.keys(bySubject).sort();
 
   return (
     <AdminLayout>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Books</h1>
-          <p className="text-gray-500 text-sm mt-1">{books.length} books in library</p>
+          <p className="text-gray-500 text-sm mt-1">{books.length} total books</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => { setShowImport(!showImport); setShowForm(false); resetImport(); }}
             className="border border-blue-600 text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg text-sm font-medium transition"
           >
-            {showImport ? "Cancel Import" : "📂 Import from File"}
+            {showImport ? "✕ Cancel" : "📂 Import File"}
           </button>
           <button
             onClick={() => { setShowForm(!showForm); setShowImport(false); }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
           >
-            {showForm ? "Cancel" : "+ Add Book"}
+            {showForm ? "✕ Cancel" : "+ Add Book"}
           </button>
         </div>
       </div>
 
-      {/* ── Manual Add Form ── */}
+      {/* Add Form */}
       {showForm && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">Add New Book</h2>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
+          <h2 className="text-base font-semibold text-gray-800 mb-4">Add New Book</h2>
           <form onSubmit={handleAdd} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[
               { label: "Book Title", key: "title", placeholder: "e.g. The Alchemist" },
@@ -182,29 +180,21 @@ export default function Books() {
             ].map(({ label, key, placeholder }) => (
               <div key={key}>
                 <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-                <input
-                  type="text" required
-                  value={form[key]}
+                <input type="text" required value={form[key]}
                   onChange={(e) => setForm({ ...form, [key]: e.target.value })}
                   placeholder={placeholder}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
             ))}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Total Copies</label>
-              <input
-                type="number" min="1" required
-                value={form.totalCopies}
+              <input type="number" min="1" required value={form.totalCopies}
                 onChange={(e) => setForm({ ...form, totalCopies: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div className="sm:col-span-2">
-              <button
-                type="submit" disabled={loading}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2 rounded-lg text-sm font-medium transition"
-              >
+              <button type="submit" disabled={loading}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2 rounded-lg text-sm font-medium transition">
                 {loading ? "Saving..." : "Save Book"}
               </button>
             </div>
@@ -212,87 +202,53 @@ export default function Books() {
         </div>
       )}
 
-      {/* ── Bulk Import Section ── */}
+      {/* Import Section */}
       {showImport && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-800 mb-1">Import Books from File</h2>
-          <p className="text-xs text-gray-400 mb-4">
-            Supports <span className="font-mono">.xlsx</span> ·{" "}
-            <span className="font-mono">.csv</span> ·{" "}
-            <span className="font-mono">.json</span>
-          </p>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
+          <h2 className="text-base font-semibold text-gray-800 mb-1">Import Books from File</h2>
+          <p className="text-xs text-gray-400 mb-3">BB Catalogue auto-detected from sheet name. Supports .xlsx · .csv · .json</p>
           <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mb-4 font-mono">
             Expected: Accession No. | Author / Editor | Title | Subject / Branch
           </p>
-
-          {importError && (
-            <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-3 mb-4">
-              {importError}
-            </div>
-          )}
-
+          {importError && <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-3 mb-3">{importError}</div>}
           {importDone && (
-            <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3 mb-4">
-              ✅ Import successful! All books have been added.
-              <button onClick={resetImport} className="ml-3 underline text-green-700 text-xs">
-                Import more
-              </button>
+            <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3 mb-3">
+              ✅ Import successful!
+              <button onClick={resetImport} className="ml-3 underline text-xs">Import more</button>
             </div>
           )}
-
           {!preview && !importDone && (
             <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 hover:border-blue-400 rounded-xl py-8 cursor-pointer transition">
               <span className="text-3xl mb-2">📂</span>
               <span className="text-sm font-medium text-gray-600">Click to choose file</span>
               <span className="text-xs text-gray-400 mt-1">.xlsx · .csv · .json</span>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".xlsx,.xls,.csv,.json"
-                onChange={handleFile}
-                className="hidden"
-              />
+              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.json" onChange={handleFile} className="hidden" />
             </label>
           )}
-
-          {importFile && !importDone && (
-            <p className="text-xs text-gray-400 mt-2">📄 {importFile}</p>
-          )}
-
-          {/* Preview Table */}
+          {importFile && !importDone && <p className="text-xs text-gray-400 mt-2">📄 {importFile}</p>}
           {preview && (
             <div className="mt-4">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-semibold text-gray-700">
-                  {preview.length} books ready to import
-                </p>
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <p className="text-sm font-semibold text-gray-700">{preview.length} books ready to import</p>
                 <div className="flex gap-2">
-                  <button
-                    onClick={resetImport}
-                    className="border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleConfirmImport}
-                    disabled={importSaving}
-                    className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-1.5 rounded-lg text-xs font-semibold transition"
-                  >
+                  <button onClick={resetImport} className="border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg text-xs">Cancel</button>
+                  <button onClick={handleConfirmImport} disabled={importSaving}
+                    className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-1.5 rounded-lg text-xs font-semibold">
                     {importSaving ? "Importing..." : `✓ Import ${preview.length} Books`}
                   </button>
                 </div>
               </div>
-
-              <div className="overflow-x-auto max-h-72 overflow-y-auto border border-gray-100 rounded-lg">
+              <div className="overflow-x-auto max-h-64 overflow-y-auto border border-gray-100 rounded-lg">
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr className="text-left text-gray-500">
                       <th className="px-3 py-2">#</th>
-                      <th className="px-3 py-2">Accession No.</th>
+                      <th className="px-3 py-2">Accession</th>
                       <th className="px-3 py-2">Title</th>
                       <th className="px-3 py-2">Author</th>
                       <th className="px-3 py-2">Subject</th>
-                      <th className="px-3 py-2">Action</th>
+                      <th className="px-3 py-2">Cat.</th>
+                      <th className="px-3 py-2">Act</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -303,27 +259,25 @@ export default function Books() {
                           <>
                             {["accessionNo", "title", "author", "subject"].map((col) => (
                               <td key={col} className="px-3 py-2">
-                                <input
-                                  value={row[col] ?? ""}
-                                  onChange={(e) =>
-                                    setPreview((p) =>
-                                      p.map((r, i) => i === idx ? { ...r, [col]: e.target.value, barcode: col === "accessionNo" ? e.target.value : r.barcode } : r)
-                                    )
-                                  }
-                                  className="w-full border border-blue-300 rounded px-1 py-0.5 text-xs"
-                                />
+                                <input value={row[col] ?? ""}
+                                  onChange={(e) => setPreview((p) => p.map((r, i) => i === idx ? { ...r, [col]: e.target.value, barcode: col === "accessionNo" ? e.target.value : r.barcode } : r))}
+                                  className="w-full border border-blue-300 rounded px-1 py-0.5" />
                               </td>
                             ))}
-                            <td className="px-3 py-2">
-                              <button onClick={() => setEditIdx(null)} className="text-green-600 font-medium hover:underline">Done</button>
-                            </td>
+                            <td className="px-3 py-2 text-gray-500">{row.isBB ? "BB" : "Main"}</td>
+                            <td className="px-3 py-2"><button onClick={() => setEditIdx(null)} className="text-green-600 font-medium">Done</button></td>
                           </>
                         ) : (
                           <>
                             <td className="px-3 py-2 font-mono text-gray-500">{row.accessionNo}</td>
                             <td className="px-3 py-2 font-medium text-gray-800 max-w-xs truncate">{row.title}</td>
-                            <td className="px-3 py-2 text-gray-500">{row.author}</td>
+                            <td className="px-3 py-2 text-gray-500 truncate">{row.author}</td>
                             <td className="px-3 py-2 text-gray-500">{row.subject}</td>
+                            <td className="px-3 py-2">
+                              <span className={`px-1.5 py-0.5 rounded-full text-xs ${row.isBB ? "bg-purple-100 text-purple-700" : "bg-blue-50 text-blue-700"}`}>
+                                {row.isBB ? "BB" : "Main"}
+                              </span>
+                            </td>
                             <td className="px-3 py-2 flex gap-2">
                               <button onClick={() => setEditIdx(idx)} className="text-blue-600 hover:underline">Edit</button>
                               <button onClick={() => setPreview((p) => p.filter((_, i) => i !== idx))} className="text-red-500 hover:underline">Del</button>
@@ -341,56 +295,162 @@ export default function Books() {
       )}
 
       {/* Search */}
-      <div className="mb-4">
-        <input
-          type="text"
-          placeholder="Search by title, author, barcode, or subject..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
+      <div className="mb-5">
+        <input type="text" placeholder="Search by title, author, barcode, or subject..."
+          value={search} onChange={(e) => setSearch(e.target.value)}
+          className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </div>
 
-      {/* Books Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-100">
-            <tr className="text-left text-gray-500">
-              <th className="px-6 py-3">Accession No.</th>
-              <th className="px-6 py-3">Title</th>
-              <th className="px-6 py-3">Author</th>
-              <th className="px-6 py-3">Subject</th>
-              <th className="px-6 py-3">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-6 py-8 text-center text-gray-400">
-                  No books found.
-                </td>
-              </tr>
-            ) : (
-              filtered.map((b) => (
-                <tr key={b.id} className="hover:bg-gray-50 transition">
-                  <td className="px-6 py-3 font-mono text-xs text-gray-500">{b.accessionNo || b.barcode}</td>
-                  <td className="px-6 py-3 font-medium text-gray-800">{b.title}</td>
-                  <td className="px-6 py-3 text-gray-500">{b.author}</td>
-                  <td className="px-6 py-3 text-gray-500">{b.subject || b.genre}</td>
-                  <td className="px-6 py-3">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                      b.available
-                        ? "bg-green-100 text-green-700"
-                        : "bg-red-100 text-red-700"
-                    }`}>
-                      {b.available ? "Available" : "Issued"}
-                    </span>
-                  </td>
-                </tr>
-              ))
+      {/* ── Books grouped by Subject ── */}
+      <div className="space-y-8">
+        {/* Main Catalogue — by subject */}
+        {subjectKeys.map((subject) => {
+          const group = bySubject[subject];
+          return (
+            <div key={subject}>
+              {/* Subject divider */}
+              <div className="flex items-center gap-3 mb-3">
+                <div className="h-px flex-1 bg-gray-200" />
+                <span className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-widest px-2">
+                  <span>📖</span>
+                  {subject}
+                  <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full font-medium normal-case">
+                    {group.length}
+                  </span>
+                </span>
+                <div className="h-px flex-1 bg-gray-200" />
+              </div>
+
+              {/* Desktop table */}
+              <div className="hidden md:block bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr className="text-left text-gray-500 text-xs uppercase">
+                      <th className="px-5 py-3">Accession No.</th>
+                      <th className="px-5 py-3">Title</th>
+                      <th className="px-5 py-3">Author</th>
+                      <th className="px-5 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {group.map((b) => (
+                      <tr key={b.id} className="hover:bg-gray-50 transition">
+                        <td className="px-5 py-3 font-mono text-xs text-gray-400">{b.accessionNo || b.barcode}</td>
+                        <td className="px-5 py-3 font-medium text-gray-800">{b.title}</td>
+                        <td className="px-5 py-3 text-gray-500">{b.author}</td>
+                        <td className="px-5 py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                            {b.available ? "Available" : "Issued"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile cards */}
+              <div className="md:hidden space-y-2">
+                {group.map((b) => (
+                  <div key={b.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-gray-800 text-sm leading-tight">{b.title}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{b.author}</p>
+                        <p className="text-xs text-gray-400 font-mono mt-1">{b.accessionNo || b.barcode}</p>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                        {b.available ? "✓ Available" : "Issued"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* ── BB Catalogue — separate section ── */}
+        {bbBooks.length > 0 && (
+          <div>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="h-px flex-1 bg-purple-200" />
+              <span className="flex items-center gap-2 text-xs font-bold text-purple-600 uppercase tracking-widest px-2">
+                <span>📘</span>
+                BB Catalogue
+                <span className="bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full font-medium normal-case">
+                  {bbBooks.length}
+                </span>
+                <button
+                  onClick={() => setShowBB(!showBB)}
+                  className="bg-purple-100 hover:bg-purple-200 text-purple-700 px-2 py-0.5 rounded text-xs normal-case font-medium transition"
+                >
+                  {showBB ? "Hide" : "Show"}
+                </button>
+              </span>
+              <div className="h-px flex-1 bg-purple-200" />
+            </div>
+
+            {showBB && (
+              <>
+                {/* Desktop */}
+                <div className="hidden md:block bg-white rounded-xl shadow-sm border border-purple-100 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-purple-50 border-b border-purple-100">
+                      <tr className="text-left text-purple-400 text-xs uppercase">
+                        <th className="px-5 py-3">Accession No.</th>
+                        <th className="px-5 py-3">Title</th>
+                        <th className="px-5 py-3">Author</th>
+                        <th className="px-5 py-3">Subject</th>
+                        <th className="px-5 py-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-purple-50">
+                      {bbBooks.map((b) => (
+                        <tr key={b.id} className="hover:bg-purple-50 transition">
+                          <td className="px-5 py-3 font-mono text-xs text-gray-400">{b.accessionNo || b.barcode}</td>
+                          <td className="px-5 py-3 font-medium text-gray-800">{b.title}</td>
+                          <td className="px-5 py-3 text-gray-500">{b.author}</td>
+                          <td className="px-5 py-3 text-gray-500">{b.subject}</td>
+                          <td className="px-5 py-3">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                              {b.available ? "Available" : "Issued"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile */}
+                <div className="md:hidden space-y-2">
+                  {bbBooks.map((b) => (
+                    <div key={b.id} className="bg-white rounded-xl border border-purple-100 shadow-sm p-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-gray-800 text-sm leading-tight">{b.title}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{b.author}</p>
+                          <p className="text-xs text-gray-400 font-mono mt-1">{b.accessionNo || b.barcode}</p>
+                          <p className="text-xs text-purple-400 mt-0.5">{b.subject}</p>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                          {b.available ? "✓" : "Issued"}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
-          </tbody>
-        </table>
+          </div>
+        )}
+
+        {filtered.length === 0 && (
+          <div className="bg-white rounded-xl border border-gray-100 py-16 text-center text-gray-400">
+            No books found.
+          </div>
+        )}
       </div>
     </AdminLayout>
   );
