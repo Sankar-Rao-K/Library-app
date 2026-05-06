@@ -3,7 +3,10 @@ import * as XLSX from "xlsx";
 import AdminLayout from "../../components/AdminLayout";
 import StudentDetailModal from "../../components/StudentDetailModal";
 import {
-  listenToStudents, addStudent, addStudentsBatch,
+  listenToStudents,
+  addStudent,
+  addStudentsBatch,
+  getExistingPins,
 } from "../../firebase/firestore";
 import { getStudentInfo, getBranchFromPin, groupStudentsBySem } from "../../utils/studentUtils";
 
@@ -21,7 +24,9 @@ function parseStudentsFromWorkbook(workbook) {
       const pinCol = row.findIndex((c) => c.includes("pin"));
       const nameCol = row.findIndex((c) => c.includes("name"));
       if (pinCol !== -1 && nameCol !== -1) {
-        headerIdx = i; cols = { pin: pinCol, name: nameCol }; break;
+        headerIdx = i;
+        cols = { pin: pinCol, name: nameCol };
+        break;
       }
     }
     const dataStart = headerIdx !== -1 ? headerIdx + 1 : 0;
@@ -33,9 +38,19 @@ function parseStudentsFromWorkbook(workbook) {
       if (!pin || !name) continue;
       if (String(pin).toLowerCase().includes("pin")) continue;
       const pinStr = String(pin).trim();
+      const nameStr = String(name).trim();
       const branch = getBranchFromPin(pinStr);
       const { yearLabel, sem, semNum, isOld } = getStudentInfo(pinStr);
-      results.push({ pin: pinStr, name: String(name).trim(), branch, year: yearLabel, currentSem: sem, semNum, isOld, email: "" });
+      results.push({
+        pin: pinStr,
+        name: nameStr,
+        branch,
+        year: yearLabel,
+        currentSem: sem,
+        semNum,
+        isOld,
+        email: "",
+      });
     }
   });
   return results;
@@ -43,15 +58,27 @@ function parseStudentsFromWorkbook(workbook) {
 
 function SemBadge({ pin }) {
   const { yearLabel, sem, isOld } = getStudentInfo(pin);
-  if (isOld) return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Passed Out</span>;
-  return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{yearLabel} · {sem}</span>;
+  if (isOld)
+    return (
+      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+        Passed Out
+      </span>
+    );
+  return (
+    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+      {yearLabel} · {sem}
+    </span>
+  );
 }
 
 const SEM_GROUP_ORDER = [
   "I Year — Sem 1",
-  "II Year — Sem 3", "II Year — Sem 4",
-  "III Year — Sem 5", "III Year — Sem 6",
-  "Passed Out", "Unknown",
+  "II Year — Sem 3",
+  "II Year — Sem 4",
+  "III Year — Sem 5",
+  "III Year — Sem 6",
+  "Passed Out",
+  "Unknown",
 ];
 
 export default function Students() {
@@ -69,6 +96,7 @@ export default function Students() {
   const [importError, setImportError] = useState("");
   const [importSaving, setImportSaving] = useState(false);
   const [importDone, setImportDone] = useState(false);
+  const [importSummary, setImportSummary] = useState("");
   const [editIdx, setEditIdx] = useState(null);
   const fileRef = useRef();
 
@@ -84,49 +112,95 @@ export default function Students() {
       const branch = getBranchFromPin(form.pin) || form.branch;
       const { yearLabel, sem, semNum, isOld } = getStudentInfo(form.pin);
       await addStudent({ ...form, branch, year: yearLabel, currentSem: sem, semNum, isOld });
-      setForm(EMPTY); setShowForm(false);
-    } catch (err) { alert("Error: " + err.message); }
+      setForm(EMPTY);
+      setShowForm(false);
+    } catch (err) {
+      alert("Error: " + err.message);
+    }
     setLoading(false);
   };
 
   const resetImport = () => {
-    setPreview(null); setImportFile(""); setImportError("");
-    setImportDone(false); setEditIdx(null);
+    setPreview(null);
+    setImportFile("");
+    setImportError("");
+    setImportSummary("");
+    setImportDone(false);
+    setEditIdx(null);
     if (fileRef.current) fileRef.current.value = "";
   };
 
   const handleFile = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setImportError(""); setPreview(null); setImportDone(false);
+    setImportError("");
+    setPreview(null);
+    setImportDone(false);
+    setImportSummary("");
     setImportFile(file.name);
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
         const wb = XLSX.read(ev.target.result, { type: "array" });
         const rows = parseStudentsFromWorkbook(wb);
-        if (rows.length === 0) { setImportError("No valid records found."); return; }
+        if (rows.length === 0) {
+          setImportError("No valid records found. Check your file format.");
+          return;
+        }
         setPreview(rows);
-      } catch (err) { setImportError("Failed to parse: " + err.message); }
+      } catch (err) {
+        setImportError("Failed to parse file: " + err.message);
+      }
     };
     reader.readAsArrayBuffer(file);
   };
 
   const handleConfirmImport = async () => {
     setImportSaving(true);
+    setImportError("");
+    setImportSummary("");
     try {
-      await addStudentsBatch(preview);
-      setImportDone(true); setPreview(null);
-    } catch (err) { setImportError("Import failed: " + err.message); }
+      const existingPins = await getExistingPins();
+      const duplicates = preview.filter((s) => existingPins.has(s.pin));
+      const newStudents = preview.filter((s) => !existingPins.has(s.pin));
+
+      if (duplicates.length > 0 && newStudents.length === 0) {
+        setImportError(
+          `All ${duplicates.length} student(s) already exist in the database. Nothing imported.`
+        );
+        setImportSaving(false);
+        return;
+      }
+
+      if (newStudents.length > 0) await addStudentsBatch(newStudents);
+
+      setImportDone(true);
+      setPreview(null);
+
+      if (duplicates.length > 0) {
+        setImportSummary(
+          `✅ ${newStudents.length} imported. ⚠️ ${duplicates.length} skipped (PIN already exists): ` +
+          duplicates.map((s) => s.pin).slice(0, 5).join(", ") +
+          (duplicates.length > 5 ? "..." : "")
+        );
+      } else {
+        setImportSummary(`✅ ${newStudents.length} students imported successfully.`);
+      }
+    } catch (err) {
+      setImportError("Import failed: " + err.message);
+    }
     setImportSaving(false);
   };
 
-  const filtered = students.filter(
-    (s) =>
-      s.name?.toLowerCase().includes(search.toLowerCase()) ||
-      s.pin?.toLowerCase().includes(search.toLowerCase()) ||
-      s.branch?.toLowerCase().includes(search.toLowerCase())
-  );
+  // Sort by PIN
+  const filtered = students
+    .filter(
+      (s) =>
+        s.name?.toLowerCase().includes(search.toLowerCase()) ||
+        s.pin?.toLowerCase().includes(search.toLowerCase()) ||
+        s.branch?.toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => (a.pin || "").localeCompare(b.pin || ""));
 
   const grouped = groupStudentsBySem(filtered);
 
@@ -154,7 +228,7 @@ export default function Students() {
         </div>
       </div>
 
-      {/* Add Form */}
+      {/* Manual Add Form */}
       {showForm && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
           <h2 className="text-base font-semibold text-gray-800 mb-1">Add New Student</h2>
@@ -184,11 +258,15 @@ export default function Students() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Branch</label>
-              <select value={getBranchFromPin(form.pin) || form.branch}
+              <select
+                value={getBranchFromPin(form.pin) || form.branch}
                 onChange={(e) => setForm({ ...form, branch: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option>CME</option><option>ECE</option>
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option>CME</option>
+                <option>ECE</option>
               </select>
+              <p className="text-xs mt-1 text-gray-400">Auto-detected from PIN</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Email (optional)</label>
@@ -207,40 +285,63 @@ export default function Students() {
         </div>
       )}
 
-      {/* Import Section */}
+      {/* Bulk Import Section */}
       {showImport && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
           <h2 className="text-base font-semibold text-gray-800 mb-1">Import Students from File</h2>
-          <p className="text-xs text-gray-400 mb-3">Year & semester auto-calculated from PIN. Supports .xlsx · .csv · .json</p>
-          {importError && <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-3 mb-3">{importError}</div>}
+          <p className="text-xs text-gray-400 mb-3">
+            Year & semester auto-calculated from PIN. Supports .xlsx · .csv · .json
+          </p>
+          <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mb-4 font-mono">
+            Expected columns: Sl.No | Pin Number | Name of the Student
+          </p>
+
+          {importError && (
+            <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-3 mb-3">
+              {importError}
+            </div>
+          )}
+
           {importDone && (
             <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3 mb-3">
-              ✅ Import successful!
+              {importSummary}
               <button onClick={resetImport} className="ml-3 underline text-xs">Import more</button>
             </div>
           )}
+
           {!preview && !importDone && (
             <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 hover:border-blue-400 rounded-xl py-8 cursor-pointer transition">
               <span className="text-3xl mb-2">📂</span>
               <span className="text-sm font-medium text-gray-600">Click to choose file</span>
-              <span className="text-xs text-gray-400 mt-1">Expected: Sl.No | Pin Number | Name of the Student</span>
-              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.json" onChange={handleFile} className="hidden" />
+              <span className="text-xs text-gray-400 mt-1">.xlsx · .csv · .json</span>
+              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.json"
+                onChange={handleFile} className="hidden" />
             </label>
           )}
-          {importFile && !importDone && <p className="text-xs text-gray-400 mt-2">📄 {importFile}</p>}
+
+          {importFile && !importDone && (
+            <p className="text-xs text-gray-400 mt-2">📄 {importFile}</p>
+          )}
+
           {preview && (
             <div className="mt-4">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <p className="text-sm font-semibold text-gray-700">{preview.length} students ready to import</p>
+                <p className="text-sm font-semibold text-gray-700">
+                  {preview.length} students ready to import
+                </p>
                 <div className="flex gap-2">
-                  <button onClick={resetImport} className="border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg text-xs">Cancel</button>
+                  <button onClick={resetImport}
+                    className="border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg text-xs hover:bg-gray-50">
+                    Cancel
+                  </button>
                   <button onClick={handleConfirmImport} disabled={importSaving}
-                    className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-1.5 rounded-lg text-xs font-semibold">
+                    className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-1.5 rounded-lg text-xs font-semibold transition">
                     {importSaving ? "Importing..." : `✓ Import ${preview.length} Students`}
                   </button>
                 </div>
               </div>
-              <div className="overflow-x-auto max-h-64 overflow-y-auto border border-gray-100 rounded-lg">
+
+              <div className="overflow-x-auto max-h-72 overflow-y-auto border border-gray-100 rounded-lg">
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr className="text-left text-gray-500">
@@ -260,17 +361,31 @@ export default function Students() {
                         {editIdx === idx ? (
                           <>
                             <td className="px-3 py-2">
-                              <input value={row.pin} onChange={(e) => setPreview((p) => p.map((r, i) => i === idx ? { ...r, pin: e.target.value, ...getStudentInfo(e.target.value), branch: getBranchFromPin(e.target.value) } : r))}
+                              <input value={row.pin}
+                                onChange={(e) => setPreview((p) => p.map((r, i) =>
+                                  i === idx
+                                    ? { ...r, pin: e.target.value, ...getStudentInfo(e.target.value), branch: getBranchFromPin(e.target.value) }
+                                    : r
+                                ))}
                                 className="w-full border border-blue-300 rounded px-1 py-0.5 font-mono" />
                             </td>
                             <td className="px-3 py-2">
-                              <input value={row.name} onChange={(e) => setPreview((p) => p.map((r, i) => i === idx ? { ...r, name: e.target.value } : r))}
+                              <input value={row.name}
+                                onChange={(e) => setPreview((p) => p.map((r, i) =>
+                                  i === idx ? { ...r, name: e.target.value } : r
+                                ))}
                                 className="w-full border border-blue-300 rounded px-1 py-0.5" />
                             </td>
                             <td className="px-3 py-2 text-gray-600">{row.branch}</td>
                             <td className="px-3 py-2 text-gray-600">{row.year} · {row.currentSem}</td>
-                            <td className="px-3 py-2">{row.isOld ? <span className="text-gray-400">Passed Out</span> : <span className="text-green-600">Active</span>}</td>
-                            <td className="px-3 py-2"><button onClick={() => setEditIdx(null)} className="text-green-600 font-medium">Done</button></td>
+                            <td className="px-3 py-2">
+                              {row.isOld
+                                ? <span className="text-gray-400">Passed Out</span>
+                                : <span className="text-green-600">Active</span>}
+                            </td>
+                            <td className="px-3 py-2">
+                              <button onClick={() => setEditIdx(null)} className="text-green-600 font-medium">Done</button>
+                            </td>
                           </>
                         ) : (
                           <>
@@ -283,9 +398,11 @@ export default function Students() {
                                 ? <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">Passed Out</span>
                                 : <span className="bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">Active</span>}
                             </td>
-                            <td className="px-3 py-2 flex gap-2">
-                              <button onClick={() => setEditIdx(idx)} className="text-blue-600 hover:underline">Edit</button>
-                              <button onClick={() => setPreview((p) => p.filter((_, i) => i !== idx))} className="text-red-500 hover:underline">Del</button>
+                            <td className="px-3 py-2">
+                              <div className="flex gap-2">
+                                <button onClick={() => setEditIdx(idx)} className="text-blue-600 hover:underline">Edit</button>
+                                <button onClick={() => setPreview((p) => p.filter((_, i) => i !== idx))} className="text-red-500 hover:underline">Del</button>
+                              </div>
                             </td>
                           </>
                         )}
@@ -306,7 +423,7 @@ export default function Students() {
           className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </div>
 
-      {/* ── Students grouped by Semester ── */}
+      {/* Students Grouped by Semester */}
       {filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-100 py-16 text-center text-gray-400">
           No students found.
@@ -318,20 +435,20 @@ export default function Students() {
             if (!group || group.length === 0) return null;
             return (
               <div key={groupName}>
-                {/* Semester Section Header */}
+                {/* Section Divider */}
                 <div className="flex items-center gap-3 mb-3">
                   <div className="h-px flex-1 bg-gray-200" />
                   <span className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-widest px-2">
                     <span>{groupName === "Passed Out" ? "🎓" : groupName === "Unknown" ? "❓" : "📅"}</span>
                     {groupName}
-                    <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full font-medium">
+                    <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full font-medium normal-case">
                       {group.length}
                     </span>
                   </span>
                   <div className="h-px flex-1 bg-gray-200" />
                 </div>
 
-                {/* Desktop table */}
+                {/* Desktop Table */}
                 <div className="hidden md:block bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b border-gray-100">
@@ -345,19 +462,14 @@ export default function Students() {
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {group.map((s) => (
-                        <tr
-                          key={s.id}
-                          onClick={() => setSelectedStudent(s)}
-                          className="cursor-pointer hover:bg-blue-50 transition"
-                        >
+                        <tr key={s.id} onClick={() => setSelectedStudent(s)}
+                          className="cursor-pointer hover:bg-blue-50 transition">
                           <td className="px-5 py-3 font-medium text-gray-800">{s.name}</td>
                           <td className="px-5 py-3 font-mono text-xs text-gray-500">{s.pin}</td>
                           <td className="px-5 py-3 text-gray-500">{s.branch}</td>
                           <td className="px-5 py-3"><SemBadge pin={s.pin} /></td>
                           <td className="px-5 py-3">
-                            <button className="text-blue-600 text-xs hover:underline font-medium">
-                              View →
-                            </button>
+                            <button className="text-blue-600 text-xs hover:underline font-medium">View →</button>
                           </td>
                         </tr>
                       ))}
@@ -365,14 +477,11 @@ export default function Students() {
                   </table>
                 </div>
 
-                {/* Mobile cards */}
+                {/* Mobile Cards */}
                 <div className="md:hidden space-y-2">
                   {group.map((s) => (
-                    <div
-                      key={s.id}
-                      onClick={() => setSelectedStudent(s)}
-                      className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between cursor-pointer active:bg-blue-50"
-                    >
+                    <div key={s.id} onClick={() => setSelectedStudent(s)}
+                      className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between cursor-pointer active:bg-blue-50">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-base flex-shrink-0">
                           {s.name?.charAt(0)}
@@ -380,7 +489,7 @@ export default function Students() {
                         <div className="min-w-0">
                           <p className="font-semibold text-gray-800 text-sm truncate">{s.name}</p>
                           <p className="text-xs text-gray-400 font-mono truncate">{s.pin}</p>
-                          <SemBadge pin={s.pin} />
+                          <div className="mt-1"><SemBadge pin={s.pin} /></div>
                         </div>
                       </div>
                       <span className="text-gray-400 text-lg flex-shrink-0">›</span>
@@ -398,6 +507,7 @@ export default function Students() {
         <StudentDetailModal
           student={selectedStudent}
           onClose={() => setSelectedStudent(null)}
+          onDeleted={() => setSelectedStudent(null)}
         />
       )}
     </AdminLayout>

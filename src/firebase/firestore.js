@@ -1,11 +1,11 @@
 import { db } from "./config";
 import {
   collection, addDoc, getDocs, getDoc,
-  doc, updateDoc, query, where,
+  doc, updateDoc, deleteDoc, query, where,
   onSnapshot, serverTimestamp, writeBatch,
 } from "firebase/firestore";
 
-// ── BOOKS ──────────────────────────────────────────
+// ── BOOKS ──────────────────────────────────────────────────────────────
 
 export const addBook = (data) =>
   addDoc(collection(db, "books"), { ...data, createdAt: serverTimestamp() });
@@ -29,7 +29,7 @@ export const getBookByBarcode = async (barcode) => {
 export const updateBook = (id, data) =>
   updateDoc(doc(db, "books", id), data);
 
-// ── STUDENTS ───────────────────────────────────────
+// ── STUDENTS ───────────────────────────────────────────────────────────
 
 export const addStudent = (data) =>
   addDoc(collection(db, "students"), { ...data, createdAt: serverTimestamp() });
@@ -41,6 +41,11 @@ export const addStudentsBatch = async (students) => {
     batch.set(ref, { ...s, createdAt: serverTimestamp() });
   });
   await batch.commit();
+};
+
+export const getExistingPins = async () => {
+  const snap = await getDocs(collection(db, "students"));
+  return new Set(snap.docs.map((d) => d.data().pin));
 };
 
 export const getStudentByPin = async (pin) => {
@@ -61,12 +66,9 @@ export const getStudentByPinAndBranch = async (pin, branch) => {
   return { id: snap.docs[0].id, ...snap.docs[0].data() };
 };
 
-export const getStudents = async () => {
-  const snap = await getDocs(collection(db, "students"));
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-};
+export const deleteStudent = (id) => deleteDoc(doc(db, "students", id));
 
-// ── TRANSACTIONS ───────────────────────────────────
+// ── TRANSACTIONS ───────────────────────────────────────────────────────
 
 export const issueBook = (data) =>
   addDoc(collection(db, "transactions"), {
@@ -103,7 +105,7 @@ export const getTransactionsByStudent = async (studentId) => {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };
 
-// ── REAL-TIME LISTENERS ────────────────────────────
+// ── REAL-TIME LISTENERS ────────────────────────────────────────────────
 
 export const listenToBooks = (cb) =>
   onSnapshot(collection(db, "books"), (snap) =>
