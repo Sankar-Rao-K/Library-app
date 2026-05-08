@@ -2,12 +2,14 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 const links = [
-  { to: "/admin",          label: "Dashboard",  icon: "📊", end: true },
-  { to: "/admin/books",    label: "Books",       icon: "📚" },
-  { to: "/admin/students", label: "Students",    icon: "🎓" },
-  { to: "/admin/issue",    label: "Issue Book",  icon: "➕" },
-  { to: "/admin/return",   label: "Return Book", icon: "↩️" },
-  { to: "/admin/settings", label: "Settings",    icon: "⚙️" },
+  { to: "/admin",          label: "Dashboard",   icon: "📊", end: true },
+  { to: "/admin/books",    label: "Books",        icon: "📚" },
+  { to: "/admin/students", label: "Students",     icon: "🎓" },
+  { to: "/admin/issue",    label: "Issue Book",   icon: "➕" },
+  { to: "/admin/return",   label: "Return Book",  icon: "↩️" },
+  { to: "/admin/qrcodes",  label: "QR Codes",     icon: "🔲" },
+  { to: "/admin/reports",  label: "Reports",      icon: "📈" },
+  { to: "/admin/settings", label: "Settings",     icon: "⚙️" },
 ];
 
 export default function Sidebar({ onClose }) {
@@ -21,7 +23,6 @@ export default function Sidebar({ onClose }) {
 
   return (
     <aside className="w-64 h-full bg-gray-900 text-white flex flex-col">
-      {/* Logo */}
       <div className="px-6 py-5 border-b border-gray-700 flex items-center justify-between flex-shrink-0">
         <div>
           <div className="text-xl font-bold flex items-center gap-2">
@@ -29,19 +30,12 @@ export default function Sidebar({ onClose }) {
           </div>
           <p className="text-gray-400 text-xs mt-0.5">Admin Panel</p>
         </div>
-        {/* Close button — mobile only */}
         {onClose && (
-          <button
-            onClick={onClose}
-            className="lg:hidden text-gray-400 hover:text-white text-xl"
-          >
-            ✕
-          </button>
+          <button onClick={onClose} className="lg:hidden text-gray-400 hover:text-white text-xl">✕</button>
         )}
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
         {links.map((link) => (
           <NavLink
             key={link.to}
@@ -62,7 +56,6 @@ export default function Sidebar({ onClose }) {
         ))}
       </nav>
 
-      {/* Logout */}
       <div className="px-3 py-4 border-t border-gray-700 flex-shrink-0">
         <button
           onClick={handleLogout}

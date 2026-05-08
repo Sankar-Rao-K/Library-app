@@ -2,12 +2,15 @@ import { useEffect, useState, useRef } from "react";
 import * as XLSX from "xlsx";
 import AdminLayout from "../../components/AdminLayout";
 import StudentDetailModal from "../../components/StudentDetailModal";
+// Add this import at the top with the other firestore imports:
 import {
   listenToStudents,
   addStudent,
   addStudentsBatch,
   getExistingPins,
+  autoDeletePassedOutStudents,
 } from "../../firebase/firestore";
+
 import { getStudentInfo, getBranchFromPin, groupStudentsBySem } from "../../utils/studentUtils";
 
 const EMPTY = { name: "", email: "", pin: "", branch: "CME" };
@@ -87,7 +90,9 @@ export default function Students() {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
-  const [search, setSearch] = useState("");
+ const [search, setSearch] = useState("");
+const [autoDeleteMsg, setAutoDeleteMsg] = useState("");
+
 
   // Import state
   const [showImport, setShowImport] = useState(false);
@@ -104,6 +109,20 @@ export default function Students() {
     const unsub = listenToStudents(setStudents);
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+  autoDeletePassedOutStudents()
+    .then((deleted) => {
+      if (deleted.length > 0) {
+        setAutoDeleteMsg(
+          `🗑️ ${deleted.length} passed-out student(s) auto-removed (all books returned): ${deleted.join(", ")}`
+        );
+
+        setTimeout(() => setAutoDeleteMsg(""), 8000);
+      }
+    })
+    .catch(() => {});
+}, []);
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -208,6 +227,13 @@ export default function Students() {
     <AdminLayout>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+        {/* Manual Add Form */}
+        {autoDeleteMsg && (
+  <div className="bg-orange-50 border border-orange-200 text-orange-700 text-sm rounded-xl px-4 py-3 mb-4 flex items-start gap-2">
+    <span className="flex-shrink-0 mt-0.5">ℹ️</span>
+    <span>{autoDeleteMsg}</span>
+  </div>
+)}
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Students</h1>
           <p className="text-gray-500 text-sm mt-1">{students.length} registered students</p>

@@ -121,6 +121,46 @@ export default function AdminDashboard() {
   const [students, setStudents] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [modal, setModal] = useState(null);
+  const [globalSearch, setGlobalSearch] = useState("");
+
+const gq = globalSearch.trim().toLowerCase();
+
+const studentResults =
+  gq.length >= 2
+    ? students.filter(
+        (s) =>
+          s.name?.toLowerCase().includes(gq) ||
+          s.pin?.toLowerCase().includes(gq) ||
+          s.branch?.toLowerCase().includes(gq) ||
+          s.year?.toLowerCase().includes(gq)
+      )
+    : [];
+
+const bookResults =
+  gq.length >= 2
+    ? books.filter(
+        (b) =>
+          b.title?.toLowerCase().includes(gq) ||
+          b.author?.toLowerCase().includes(gq) ||
+          String(
+            b.accessionNo || b.barcode || ""
+          )
+            .toLowerCase()
+            .includes(gq) ||
+          b.subject?.toLowerCase().includes(gq)
+      )
+    : [];
+
+const txnResults =
+  gq.length >= 2
+    ? transactions.filter(
+        (t) =>
+          t.bookTitle?.toLowerCase().includes(gq) ||
+          t.studentName?.toLowerCase().includes(gq) ||
+          t.studentPin?.toLowerCase().includes(gq) ||
+          t.barcode?.toLowerCase().includes(gq)
+      )
+    : [];
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -256,6 +296,142 @@ export default function AdminDashboard() {
           subtitle="Registered"
           onClick={() => setModal("students")} />
       </div>
+
+      {/* Universal Search */}
+<div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-8">
+  <h2 className="text-sm font-semibold text-gray-700 mb-3">
+    🔍 Universal Search
+  </h2>
+
+  <input
+    type="text"
+    placeholder="Search students, books, transactions... (case-insensitive)"
+    value={globalSearch}
+    onChange={(e) => setGlobalSearch(e.target.value)}
+    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+  />
+
+  {globalSearch.trim().length >= 2 && (
+    <div className="mt-4 space-y-4">
+
+      {/* Student results */}
+      {studentResults.length > 0 && (
+        <div>
+          <p className="text-xs font-bold text-gray-400 uppercase mb-2">
+            🎓 Students ({studentResults.length})
+          </p>
+
+          <div className="space-y-1">
+            {studentResults.slice(0, 5).map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center justify-between bg-purple-50 rounded-lg px-4 py-2"
+              >
+                <div>
+                  <span className="text-sm font-medium text-gray-800">
+                    {s.name}
+                  </span>
+
+                  <span className="text-xs text-gray-400 font-mono ml-2">
+                    {s.pin}
+                  </span>
+                </div>
+
+                <span className="text-xs text-gray-400">
+                  {s.branch}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Book results */}
+      {bookResults.length > 0 && (
+        <div>
+          <p className="text-xs font-bold text-gray-400 uppercase mb-2">
+            📚 Books ({bookResults.length})
+          </p>
+
+          <div className="space-y-1">
+            {bookResults.slice(0, 5).map((b) => (
+              <div
+                key={b.id}
+                className="flex items-center justify-between bg-blue-50 rounded-lg px-4 py-2"
+              >
+                <div>
+                  <span className="text-sm font-medium text-gray-800">
+                    {b.title}
+                  </span>
+
+                  <span className="text-xs text-gray-400 font-mono ml-2">
+                    {b.accessionNo || b.barcode}
+                  </span>
+                </div>
+
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full ${
+                    b.available
+                      ? "bg-green-100 text-green-700"
+                      : "bg-red-100 text-red-700"
+                  }`}
+                >
+                  {b.available ? "Available" : "Issued"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Transaction results */}
+      {txnResults.length > 0 && (
+        <div>
+          <p className="text-xs font-bold text-gray-400 uppercase mb-2">
+            📋 Transactions ({txnResults.length})
+          </p>
+
+          <div className="space-y-1">
+            {txnResults.slice(0, 5).map((t) => (
+              <div
+                key={t.id}
+                className="flex items-center justify-between bg-yellow-50 rounded-lg px-4 py-2"
+              >
+                <div>
+                  <span className="text-sm font-medium text-gray-800">
+                    {t.bookTitle}
+                  </span>
+
+                  <span className="text-xs text-gray-400 ml-2">
+                    → {t.studentName}
+                  </span>
+                </div>
+
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full ${
+                    t.status === "issued"
+                      ? "bg-yellow-100 text-yellow-700"
+                      : "bg-green-100 text-green-700"
+                  }`}
+                >
+                  {t.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {studentResults.length === 0 &&
+        bookResults.length === 0 &&
+        txnResults.length === 0 && (
+          <p className="text-sm text-gray-400 text-center py-4">
+            No results found for "{globalSearch}"
+          </p>
+        )}
+    </div>
+  )}
+</div>
 
       {/* Quick Actions */}
       <div className="grid grid-cols-2 gap-3 mb-8">

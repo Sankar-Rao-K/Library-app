@@ -5,7 +5,7 @@ import {
   onSnapshot, serverTimestamp, writeBatch,
 } from "firebase/firestore";
 
-// ── BOOKS ──────────────────────────────────────────────────────────────
+// ── BOOKS ───────────────────────────────────────────────────────────────
 
 export const addBook = (data) =>
   addDoc(collection(db, "books"), { ...data, createdAt: serverTimestamp() });
@@ -29,7 +29,7 @@ export const getBookByBarcode = async (barcode) => {
 export const updateBook = (id, data) =>
   updateDoc(doc(db, "books", id), data);
 
-// ── STUDENTS ───────────────────────────────────────────────────────────
+// ── STUDENTS ────────────────────────────────────────────────────────────
 
 export const addStudent = (data) =>
   addDoc(collection(db, "students"), { ...data, createdAt: serverTimestamp() });
@@ -68,7 +68,45 @@ export const getStudentByPinAndBranch = async (pin, branch) => {
 
 export const deleteStudent = (id) => deleteDoc(doc(db, "students", id));
 
-// ── TRANSACTIONS ───────────────────────────────────────────────────────
+// Auto-delete passed-out students who have no active issues
+export const autoDeletePassedOutStudents = async () => {
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+  const academicYearStart = month >= 7 ? currentYear : currentYear - 1;
+
+  const snap = await getDocs(collection(db, "students"));
+  const allStudents = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  const deleted = [];
+
+  for (const student of allStudents) {
+    if (!student.pin) continue;
+    const joinYearShort = parseInt(String(student.pin).substring(0, 2), 10);
+    if (isNaN(joinYearShort)) continue;
+    const joinYear = 2000 + joinYearShort;
+    const studyYear = (academicYearStart - joinYear) + 1;
+    if (studyYear <= 3) continue; // Not passed out yet
+
+    // Check for active (unreturned) issues
+    const txnQ = query(
+      collection(db, "transactions"),
+      where("studentId", "==", student.id),
+      where("status", "==", "issued")
+    );
+    const txnSnap = await getDocs(txnQ);
+
+    if (txnSnap.empty) {
+      // No active issues — safe to delete
+      await deleteDoc(doc(db, "students", student.id));
+      deleted.push(student.name);
+    }
+  }
+
+  return deleted;
+};
+
+// ── TRANSACTIONS ────────────────────────────────────────────────────────
 
 export const issueBook = (data) =>
   addDoc(collection(db, "transactions"), {
@@ -105,7 +143,7 @@ export const getTransactionsByStudent = async (studentId) => {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };
 
-// ── REAL-TIME LISTENERS ────────────────────────────────────────────────
+// ── REAL-TIME LISTENERS ─────────────────────────────────────────────────
 
 export const listenToBooks = (cb) =>
   onSnapshot(collection(db, "books"), (snap) =>

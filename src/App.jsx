@@ -1,12 +1,14 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
-import Login from "./pages/Login";
+import Login          from "./pages/Login";
 import AdminDashboard from "./pages/admin/Dashboard";
-import Books from "./pages/admin/Books";
-import Students from "./pages/admin/Students";
-import IssueBook from "./pages/admin/IssueBook";
-import ReturnBook from "./pages/admin/ReturnBook";
-import Settings from "./pages/admin/Settings";
+import Books          from "./pages/admin/Books";
+import Students       from "./pages/admin/Students";
+import IssueBook      from "./pages/admin/IssueBook";
+import ReturnBook     from "./pages/admin/ReturnBook";
+import QRCodes        from "./pages/admin/QRCodes";
+import Reports        from "./pages/admin/Reports";
+import Settings       from "./pages/admin/Settings";
 import StudentDashboard from "./pages/student/Dashboard";
 
 function LoadingScreen() {
@@ -43,11 +45,13 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<AuthRoute><Login /></AuthRoute>} />
 
-        <Route path="/admin" element={<ProtectedRoute allowedRole="admin"><AdminDashboard /></ProtectedRoute>} />
-        <Route path="/admin/books" element={<ProtectedRoute allowedRole="admin"><Books /></ProtectedRoute>} />
+        <Route path="/admin"          element={<ProtectedRoute allowedRole="admin"><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/admin/books"    element={<ProtectedRoute allowedRole="admin"><Books /></ProtectedRoute>} />
         <Route path="/admin/students" element={<ProtectedRoute allowedRole="admin"><Students /></ProtectedRoute>} />
-        <Route path="/admin/issue" element={<ProtectedRoute allowedRole="admin"><IssueBook /></ProtectedRoute>} />
-        <Route path="/admin/return" element={<ProtectedRoute allowedRole="admin"><ReturnBook /></ProtectedRoute>} />
+        <Route path="/admin/issue"    element={<ProtectedRoute allowedRole="admin"><IssueBook /></ProtectedRoute>} />
+        <Route path="/admin/return"   element={<ProtectedRoute allowedRole="admin"><ReturnBook /></ProtectedRoute>} />
+        <Route path="/admin/qrcodes"  element={<ProtectedRoute allowedRole="admin"><QRCodes /></ProtectedRoute>} />
+        <Route path="/admin/reports"  element={<ProtectedRoute allowedRole="admin"><Reports /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute allowedRole="admin"><Settings /></ProtectedRoute>} />
 
         <Route path="/student" element={<ProtectedRoute allowedRole="student"><StudentDashboard /></ProtectedRoute>} />
