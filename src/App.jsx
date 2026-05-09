@@ -1,15 +1,17 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
-import Login          from "./pages/Login";
-import AdminDashboard from "./pages/admin/Dashboard";
-import Books          from "./pages/admin/Books";
-import Students       from "./pages/admin/Students";
-import IssueBook      from "./pages/admin/IssueBook";
-import ReturnBook     from "./pages/admin/ReturnBook";
-import QRCodes        from "./pages/admin/QRCodes";
-import Reports        from "./pages/admin/Reports";
-import Settings       from "./pages/admin/Settings";
+import Login            from "./pages/Login";
+import AdminDashboard   from "./pages/admin/Dashboard";
+import Books            from "./pages/admin/Books";
+import Students         from "./pages/admin/Students";
+import Staff            from "./pages/admin/Staff";
+import IssueBook        from "./pages/admin/IssueBook";
+import ReturnBook       from "./pages/admin/ReturnBook";
+import QRCodes          from "./pages/admin/QRCodes";
+import Reports          from "./pages/admin/Reports";
+import Settings         from "./pages/admin/Settings";
 import StudentDashboard from "./pages/student/Dashboard";
+import StaffDashboard   from "./pages/staff/Dashboard";
 
 function LoadingScreen() {
   return (
@@ -35,6 +37,7 @@ function AuthRoute({ children }) {
   const { user, role, studentData, loading } = useAuth();
   if (loading) return <LoadingScreen />;
   if (user && role === "admin") return <Navigate to="/admin" replace />;
+  if (studentData?.borrowerType === "staff" && role === "student") return <Navigate to="/staff" replace />;
   if (studentData && role === "student") return <Navigate to="/student" replace />;
   return children;
 }
@@ -48,6 +51,7 @@ export default function App() {
         <Route path="/admin"          element={<ProtectedRoute allowedRole="admin"><AdminDashboard /></ProtectedRoute>} />
         <Route path="/admin/books"    element={<ProtectedRoute allowedRole="admin"><Books /></ProtectedRoute>} />
         <Route path="/admin/students" element={<ProtectedRoute allowedRole="admin"><Students /></ProtectedRoute>} />
+        <Route path="/admin/staff"    element={<ProtectedRoute allowedRole="admin"><Staff /></ProtectedRoute>} />
         <Route path="/admin/issue"    element={<ProtectedRoute allowedRole="admin"><IssueBook /></ProtectedRoute>} />
         <Route path="/admin/return"   element={<ProtectedRoute allowedRole="admin"><ReturnBook /></ProtectedRoute>} />
         <Route path="/admin/qrcodes"  element={<ProtectedRoute allowedRole="admin"><QRCodes /></ProtectedRoute>} />
@@ -55,6 +59,7 @@ export default function App() {
         <Route path="/admin/settings" element={<ProtectedRoute allowedRole="admin"><Settings /></ProtectedRoute>} />
 
         <Route path="/student" element={<ProtectedRoute allowedRole="student"><StudentDashboard /></ProtectedRoute>} />
+        <Route path="/staff"   element={<ProtectedRoute allowedRole="student"><StaffDashboard /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>

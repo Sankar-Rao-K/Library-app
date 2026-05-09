@@ -35,17 +35,27 @@ export default function IssueBook() {
 
   // Auto-fetch if prefillPin given
   useEffect(() => {
-    if (!prefillPin) return;
-    (async () => {
-      setLoading(true);
-      try {
-        const found = await getStudentByPin(prefillPin.trim());
-        if (found) { setStudent(found); setStep(STEPS.BOOK); }
-        else { setStep(STEPS.PIN); setPin(""); }
-      } catch {}
-      setLoading(false);
-    })();
-  }, [prefillPin]);
+  const prefillId = location.state?.prefillId || location.state?.prefillPin || "";
+  const bType     = location.state?.borrowerType || "student";
+  if (!prefillId) return;
+  (async () => {
+    setLoading(true);
+    try {
+      let found = null;
+      if (bType === "staff") {
+        const { getStaffByStaffId } = await import("../../firebase/firestore");
+        found = await getStaffByStaffId(prefillId.trim());
+        if (found) found.borrowerType = "staff";
+      } else {
+        found = await getStudentByPin(prefillId.trim());
+        if (found) found.borrowerType = "student";
+      }
+      if (found) { setStudent(found); setStep(STEPS.BOOK); }
+      else { setStep(STEPS.PIN); }
+    } catch {}
+    setLoading(false);
+  })();
+}, [location.state]);
 
   useEffect(() => {
     if (step === STEPS.BOOK) setTimeout(() => accessRef.current?.focus(), 150);
@@ -142,24 +152,29 @@ export default function IssueBook() {
 
   // Step 4 — Confirm
   const handleConfirm = async () => {
-    setLoading(true);
-    try {
-      const { semNum } = getStudentInfo(student.pin);
-      await issueBook({
-        studentId:    student.id,
-        studentName:  student.name,
-        studentPin:   student.pin,
-        studentBranch: student.branch,
-        bookId:       book.id,
-        bookTitle:    book.title,
-        barcode:      book.barcode || book.accessionNo,
-        semNum:       semNum || null,
-      });
-      await updateBook(book.id, { available: false });
-      setStep(STEPS.SUCCESS);
-    } catch (err) { setError("Error saving: " + err.message); }
-    setLoading(false);
-  };
+  setLoading(true);
+  try {
+    const isStaff = student.borrowerType === "staff";
+    const { semNum } = isStaff ? {} : getStudentInfo(student.pin);
+    await issueBook({
+      borrowerId:    student.id,
+      borrowerName:  student.name,
+      borrowerType:  student.borrowerType || "student",
+      // legacy fields for backward compat
+      studentId:     student.id,
+      studentName:   student.name,
+      studentPin:    student.pin || student.staffId || "",
+      studentBranch: student.branch || student.section || "",
+      bookId:    book.id,
+      bookTitle: book.title,
+      barcode:   book.barcode || book.accessionNo,
+      semNum:    semNum || null,
+    });
+    await updateBook(book.id, { available: false });
+    setStep(STEPS.SUCCESS);
+  } catch (err) { setError("Error saving: " + err.message); }
+  setLoading(false);
+};
 
   const allSteps = [
     { key: STEPS.PIN,         label: "1. Student PIN" },
