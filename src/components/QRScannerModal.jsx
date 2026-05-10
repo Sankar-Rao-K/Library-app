@@ -1,105 +1,104 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import jsQR from "jsqr";
 
 export default function QRScannerModal({ onScan, onClose, title = "Scan QR Code" }) {
-  const videoRef    = useRef(null);
-  const canvasRef   = useRef(null);
-  const streamRef   = useRef(null);
-  const rafRef      = useRef(null);
-  const mountedRef  = useRef(true);
+  const videoRef   = useRef(null);
+  const mountedRef = useRef(true);
+  const readerRef  = useRef(null);
 
-  const [status, setStatus]     = useState("starting"); // starting | scanning | error
+  const [status, setStatus]     = useState("starting");
   const [errorMsg, setErrorMsg] = useState("");
   const [scanned, setScanned]   = useState(false);
+  const [torchOn, setTorchOn]   = useState(false);
+  const trackRef = useRef(null);
 
-  // ── Stop everything cleanly ────────────────────────────────────────
-  const stopAll = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
+  // ── Clean stop ─────────────────────────────────────────────────────
+  const stopAll = useCallback(async () => {
+    try {
+      if (readerRef.current) {
+        await readerRef.current.reset();
+        readerRef.current = null;
+      }
+    } catch {}
   }, []);
 
-  // ── Scan loop — reads frames via jsQR ─────────────────────────────
-  const scanLoop = useCallback(() => {
-    if (!mountedRef.current) return;
-    const video  = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
-      rafRef.current = requestAnimationFrame(scanLoop);
-      return;
-    }
+  const handleClose = useCallback(async () => {
+    mountedRef.current = false;
+    await stopAll();
+    onClose();
+  }, [stopAll, onClose]);
 
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    canvas.width  = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: "dontInvert",
-    });
-
-    if (code && code.data) {
-      if (!mountedRef.current) return;
-      setScanned(true);
-      stopAll();
-      // Small delay so the "✅ Scanned!" flash is visible
-      setTimeout(() => {
-        if (mountedRef.current) onScan(code.data.trim());
-      }, 300);
-      return;
-    }
-
-    rafRef.current = requestAnimationFrame(scanLoop);
-  }, [onScan, stopAll]);
-
-  // ── Start camera ──────────────────────────────────────────────────
+  // ── Start scanner ──────────────────────────────────────────────────
   useEffect(() => {
     mountedRef.current = true;
 
     const start = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: "environment",
-            width:  { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
-        });
+        // Dynamic import to avoid SSR issues
+        const { BrowserQRCodeReader, BrowserCodeReader } = await import("@zxing/browser");
 
-        if (!mountedRef.current) {
-          stream.getTracks().forEach((t) => t.stop());
+        if (!mountedRef.current) return;
+
+        const hints = new Map();
+        // Try all possible formats
+        const { DecodeHintType, BarcodeFormat } = await import("@zxing/library");
+        hints.set(DecodeHintType.TRY_HARDER, true);
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
+
+        const reader = new BrowserQRCodeReader(hints, {
+          delayBetweenScanAttempts: 100,
+          delayBetweenScanSuccess: 500,
+        });
+        readerRef.current = reader;
+
+        // Get available cameras
+        const devices = await BrowserCodeReader.listVideoInputDevices();
+        if (!mountedRef.current) return;
+
+        if (!devices || devices.length === 0) {
+          setErrorMsg("No camera found on this device.");
+          setStatus("error");
           return;
         }
 
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.setAttribute("playsinline", true);
-          await videoRef.current.play();
-        }
+        // Prefer back camera on mobile
+        const backCamera = devices.find((d) =>
+          d.label.toLowerCase().includes("back") ||
+          d.label.toLowerCase().includes("rear") ||
+          d.label.toLowerCase().includes("environment")
+        );
+        const selectedDevice = backCamera || devices[devices.length - 1];
 
-        if (mountedRef.current) {
-          setStatus("scanning");
-          rafRef.current = requestAnimationFrame(scanLoop);
-        }
+        if (!mountedRef.current) return;
+        setStatus("scanning");
+
+        await reader.decodeFromVideoDevice(
+          selectedDevice.deviceId,
+          videoRef.current,
+          (result, err, controls) => {
+            if (!mountedRef.current) { controls.stop(); return; }
+            if (result) {
+              setScanned(true);
+              controls.stop();
+              setTimeout(() => {
+                if (mountedRef.current) onScan(result.getText().trim());
+              }, 400);
+            }
+            // err is normal (no QR in frame), ignore it
+          }
+        );
       } catch (err) {
         if (!mountedRef.current) return;
-        const msg = err?.name || err?.message || "";
-        if (msg.includes("NotAllowed") || msg.includes("Permission")) {
-          setErrorMsg("Camera permission denied. Please allow camera access in your browser settings.");
-        } else if (msg.includes("NotFound") || msg.includes("Devices")) {
-          setErrorMsg("No camera found on this device.");
-        } else if (msg.includes("NotReadable") || msg.includes("Busy")) {
-          setErrorMsg("Camera is in use by another app. Close it and try again.");
+        const msg = String(err?.message || err || "");
+        if (msg.includes("NotAllowed") || msg.includes("Permission") || msg.includes("denied")) {
+          setErrorMsg("Camera permission denied. Please tap Allow when your browser asks for camera access.");
+        } else if (msg.includes("NotFound") || msg.includes("DevicesNotFound")) {
+          setErrorMsg("No camera found. Make sure your device has a camera.");
+        } else if (msg.includes("NotReadable") || msg.includes("Busy") || msg.includes("TrackStart")) {
+          setErrorMsg("Camera is being used by another app. Close that app and try again.");
+        } else if (msg.includes("OverconstrainedError") || msg.includes("Overconstrained")) {
+          setErrorMsg("Camera not compatible. Try a different browser.");
         } else {
-          setErrorMsg("Could not access camera: " + (err?.message || msg));
+          setErrorMsg(msg || "Unable to start camera. Try entering the code manually.");
         }
         setStatus("error");
       }
@@ -109,24 +108,34 @@ export default function QRScannerModal({ onScan, onClose, title = "Scan QR Code"
 
     return () => {
       mountedRef.current = false;
-      cancelAnimationFrame(rafRef.current);
       stopAll();
     };
-  }, [scanLoop, stopAll]);
+  }, [stopAll, onScan]);
 
-  const handleClose = () => {
-    mountedRef.current = false;
-    stopAll();
-    onClose();
+  // ── Torch (flashlight) toggle ──────────────────────────────────────
+  const toggleTorch = async () => {
+    try {
+      const stream = videoRef.current?.srcObject;
+      if (!stream) return;
+      const track = stream.getVideoTracks()[0];
+      if (!track) return;
+      const newState = !torchOn;
+      await track.applyConstraints({ advanced: [{ torch: newState }] });
+      setTorchOn(newState);
+    } catch {
+      // Torch not supported — silently ignore
+    }
   };
 
   return (
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center p-4"
-      style={{ backgroundColor: "rgba(0,0,0,0.80)" }}
+      style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-
+      <div
+        className="bg-white rounded-2xl shadow-2xl overflow-hidden"
+        style={{ width: "100%", maxWidth: "360px" }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <h3 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
@@ -134,100 +143,140 @@ export default function QRScannerModal({ onScan, onClose, title = "Scan QR Code"
           </h3>
           <button
             onClick={handleClose}
-            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-800 text-xl transition"
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-800 text-xl leading-none transition"
           >
             ✕
           </button>
         </div>
 
-        <div className="p-4">
-          {/* Starting */}
+        <div className="p-4 space-y-3">
+          {/* ── STARTING ── */}
           {status === "starting" && (
             <div className="text-center py-10">
-              <div className="text-5xl mb-4 animate-pulse">📷</div>
-              <p className="text-gray-600 font-medium text-sm">Starting camera...</p>
-              <p className="text-gray-400 text-xs mt-1">Please allow camera access if prompted</p>
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-blue-50 flex items-center justify-center">
+                <span className="text-3xl animate-pulse">📷</span>
+              </div>
+              <p className="text-gray-700 font-medium text-sm">Starting camera...</p>
+              <p className="text-gray-400 text-xs mt-1">
+                Allow camera access when prompted
+              </p>
             </div>
           )}
 
-          {/* Error */}
+          {/* ── ERROR ── */}
           {status === "error" && (
-            <div className="text-center py-8 px-2">
-              <div className="text-5xl mb-4">📵</div>
+            <div className="text-center py-6 px-2">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-50 flex items-center justify-center">
+                <span className="text-3xl">📵</span>
+              </div>
               <p className="text-red-600 font-semibold text-sm mb-2">Camera unavailable</p>
-              <p className="text-gray-500 text-xs leading-relaxed mb-5">{errorMsg}</p>
-              <p className="text-gray-400 text-xs bg-gray-50 rounded-lg p-3">
-                💡 Close this modal and enter the code manually using the text field below.
-              </p>
+              <p className="text-gray-500 text-xs leading-relaxed px-2 mb-4">{errorMsg}</p>
+              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-700 text-left">
+                <p className="font-semibold mb-1">💡 Tips:</p>
+                <ul className="space-y-1 list-disc list-inside">
+                  <li>Use Chrome or Safari on mobile</li>
+                  <li>Make sure camera permission is allowed</li>
+                  <li>Close other apps using the camera</li>
+                  <li>Or type the code manually below</li>
+                </ul>
+              </div>
               <button
                 onClick={handleClose}
-                className="mt-4 bg-blue-600 hover:bg-blue-700 text-white text-sm px-6 py-2.5 rounded-lg font-medium transition w-full"
+                className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm px-6 py-2.5 rounded-xl font-medium transition"
               >
-                Use Manual Entry Instead
+                Use Manual Entry
               </button>
             </div>
           )}
 
-          {/* Scanned flash */}
+          {/* ── SCANNED ── */}
           {scanned && (
             <div className="text-center py-10">
-              <div className="text-5xl mb-3">✅</div>
-              <p className="text-green-600 font-semibold text-sm">QR Code Detected!</p>
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-50 flex items-center justify-center">
+                <span className="text-3xl">✅</span>
+              </div>
+              <p className="text-green-600 font-bold text-base">QR Code Detected!</p>
+              <p className="text-gray-400 text-xs mt-1">Processing...</p>
             </div>
           )}
 
-          {/* Camera view */}
+          {/* ── SCANNING ── */}
           {status === "scanning" && !scanned && (
-            <div className="relative">
-              {/* Video */}
-              <video
-                ref={videoRef}
-                className="w-full rounded-xl object-cover"
-                style={{ maxHeight: "300px" }}
-                muted
-                playsInline
-              />
+            <>
+              {/* Video container */}
+              <div className="relative rounded-xl overflow-hidden bg-black" style={{ aspectRatio: "4/3" }}>
+                <video
+                  ref={videoRef}
+                  className="w-full h-full object-cover"
+                  muted
+                  playsInline
+                  autoPlay
+                />
 
-              {/* Overlay frame */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="relative w-48 h-48">
-                  {/* Corner markers */}
-                  {[
-                    "top-0 left-0 border-t-4 border-l-4 rounded-tl-lg",
-                    "top-0 right-0 border-t-4 border-r-4 rounded-tr-lg",
-                    "bottom-0 left-0 border-b-4 border-l-4 rounded-bl-lg",
-                    "bottom-0 right-0 border-b-4 border-r-4 rounded-br-lg",
-                  ].map((cls, i) => (
-                    <div key={i} className={`absolute w-8 h-8 border-blue-400 ${cls}`} />
-                  ))}
-                  {/* Scan line animation */}
+                {/* Dark overlay with hole in center */}
+                <div className="absolute inset-0 pointer-events-none">
+                  {/* Top overlay */}
+                  <div className="absolute top-0 left-0 right-0 bg-black/40" style={{ height: "calc(50% - 80px)" }} />
+                  {/* Bottom overlay */}
+                  <div className="absolute bottom-0 left-0 right-0 bg-black/40" style={{ height: "calc(50% - 80px)" }} />
+                  {/* Left overlay */}
+                  <div className="absolute left-0 bg-black/40" style={{ top: "calc(50% - 80px)", bottom: "calc(50% - 80px)", width: "calc(50% - 80px)" }} />
+                  {/* Right overlay */}
+                  <div className="absolute right-0 bg-black/40" style={{ top: "calc(50% - 80px)", bottom: "calc(50% - 80px)", width: "calc(50% - 80px)" }} />
+
+                  {/* Target box */}
                   <div
-                    className="absolute left-2 right-2 h-0.5 bg-blue-400 opacity-80"
+                    className="absolute"
                     style={{
-                      animation: "scanline 2s ease-in-out infinite",
-                      top: "50%",
+                      top: "50%", left: "50%",
+                      width: 160, height: 160,
+                      transform: "translate(-50%, -50%)",
                     }}
-                  />
+                  >
+                    {/* Corners */}
+                    <div className="absolute top-0 left-0 w-8 h-8 border-t-3 border-l-3 border-blue-400 rounded-tl-lg" style={{ borderWidth: "3px 0 0 3px" }} />
+                    <div className="absolute top-0 right-0 w-8 h-8 border-blue-400 rounded-tr-lg" style={{ borderWidth: "3px 3px 0 0" }} />
+                    <div className="absolute bottom-0 left-0 w-8 h-8 border-blue-400 rounded-bl-lg" style={{ borderWidth: "0 0 3px 3px" }} />
+                    <div className="absolute bottom-0 right-0 w-8 h-8 border-blue-400 rounded-br-lg" style={{ borderWidth: "0 3px 3px 0" }} />
+
+                    {/* Animated scan line */}
+                    <div
+                      className="absolute left-1 right-1 bg-blue-400 rounded"
+                      style={{
+                        height: "2px",
+                        animation: "scan 2s ease-in-out infinite",
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
 
-          {/* Hint text */}
-          {status === "scanning" && !scanned && (
-            <p className="text-center text-xs text-gray-400 mt-3 leading-relaxed">
-              Hold the QR code steady inside the frame. It scans automatically.
-            </p>
+              {/* Controls */}
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-400">
+                  Hold QR code in the box
+                </p>
+                <button
+                  onClick={toggleTorch}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-medium transition ${
+                    torchOn
+                      ? "bg-yellow-100 text-yellow-700"
+                      : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                  }`}
+                >
+                  {torchOn ? "🔦 Flash On" : "🔦 Flash"}
+                </button>
+              </div>
+            </>
           )}
         </div>
       </div>
 
-      {/* Scan line animation keyframes */}
       <style>{`
-        @keyframes scanline {
-          0%   { top: 10%; opacity: 1; }
-          50%  { top: 90%; opacity: 0.6; }
-          100% { top: 10%; opacity: 1; }
+        @keyframes scan {
+          0%   { top: 4px;  opacity: 1; }
+          50%  { top: calc(100% - 6px); opacity: 0.7; }
+          100% { top: 4px;  opacity: 1; }
         }
       `}</style>
     </div>
