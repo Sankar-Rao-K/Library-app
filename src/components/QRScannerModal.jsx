@@ -4,14 +4,11 @@ export default function QRScannerModal({ onScan, onClose, title = "Scan QR Code"
   const videoRef   = useRef(null);
   const mountedRef = useRef(true);
   const readerRef  = useRef(null);
-
   const [status, setStatus]     = useState("starting");
   const [errorMsg, setErrorMsg] = useState("");
   const [scanned, setScanned]   = useState(false);
   const [torchOn, setTorchOn]   = useState(false);
-  const trackRef = useRef(null);
 
-  // ── Clean stop ─────────────────────────────────────────────────────
   const stopAll = useCallback(async () => {
     try {
       if (readerRef.current) {
@@ -27,30 +24,30 @@ export default function QRScannerModal({ onScan, onClose, title = "Scan QR Code"
     onClose();
   }, [stopAll, onClose]);
 
-  // ── Start scanner ──────────────────────────────────────────────────
   useEffect(() => {
     mountedRef.current = true;
+    let started = false;
 
     const start = async () => {
-      try {
-        // Dynamic import to avoid SSR issues
-        const { BrowserQRCodeReader, BrowserCodeReader } = await import("@zxing/browser");
+      // Small delay to ensure the video element is mounted and visible in DOM
+      await new Promise((r) => setTimeout(r, 200));
+      if (!mountedRef.current) return;
 
+      try {
+        const { BrowserQRCodeReader, BrowserCodeReader } = await import("@zxing/browser");
+        const { DecodeHintType, BarcodeFormat } = await import("@zxing/library");
         if (!mountedRef.current) return;
 
         const hints = new Map();
-        // Try all possible formats
-        const { DecodeHintType, BarcodeFormat } = await import("@zxing/library");
         hints.set(DecodeHintType.TRY_HARDER, true);
         hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
 
         const reader = new BrowserQRCodeReader(hints, {
-          delayBetweenScanAttempts: 100,
-          delayBetweenScanSuccess: 500,
+          delayBetweenScanAttempts: 150,
         });
         readerRef.current = reader;
+        started = true;
 
-        // Get available cameras
         const devices = await BrowserCodeReader.listVideoInputDevices();
         if (!mountedRef.current) return;
 
@@ -60,19 +57,22 @@ export default function QRScannerModal({ onScan, onClose, title = "Scan QR Code"
           return;
         }
 
-        // Prefer back camera on mobile
+        // Prefer back/environment camera
         const backCamera = devices.find((d) =>
-          d.label.toLowerCase().includes("back") ||
-          d.label.toLowerCase().includes("rear") ||
-          d.label.toLowerCase().includes("environment")
-        );
-        const selectedDevice = backCamera || devices[devices.length - 1];
+          /back|rear|environment/i.test(d.label)
+        ) || devices[devices.length - 1];
 
-        if (!mountedRef.current) return;
+        // Ensure video element is ready
+        if (!videoRef.current) {
+          setErrorMsg("Video element not ready. Please try again.");
+          setStatus("error");
+          return;
+        }
+
         setStatus("scanning");
 
         await reader.decodeFromVideoDevice(
-          selectedDevice.deviceId,
+          backCamera.deviceId,
           videoRef.current,
           (result, err, controls) => {
             if (!mountedRef.current) { controls.stop(); return; }
@@ -81,24 +81,21 @@ export default function QRScannerModal({ onScan, onClose, title = "Scan QR Code"
               controls.stop();
               setTimeout(() => {
                 if (mountedRef.current) onScan(result.getText().trim());
-              }, 400);
+              }, 500);
             }
-            // err is normal (no QR in frame), ignore it
           }
         );
       } catch (err) {
         if (!mountedRef.current) return;
         const msg = String(err?.message || err || "");
-        if (msg.includes("NotAllowed") || msg.includes("Permission") || msg.includes("denied")) {
-          setErrorMsg("Camera permission denied. Please tap Allow when your browser asks for camera access.");
-        } else if (msg.includes("NotFound") || msg.includes("DevicesNotFound")) {
-          setErrorMsg("No camera found. Make sure your device has a camera.");
-        } else if (msg.includes("NotReadable") || msg.includes("Busy") || msg.includes("TrackStart")) {
-          setErrorMsg("Camera is being used by another app. Close that app and try again.");
-        } else if (msg.includes("OverconstrainedError") || msg.includes("Overconstrained")) {
-          setErrorMsg("Camera not compatible. Try a different browser.");
+        if (/NotAllowed|Permission|denied/i.test(msg)) {
+          setErrorMsg("Camera permission denied. Please allow camera access in browser settings.");
+        } else if (/NotFound|DevicesNotFound/i.test(msg)) {
+          setErrorMsg("No camera found on this device.");
+        } else if (/NotReadable|Busy|TrackStart/i.test(msg)) {
+          setErrorMsg("Camera is in use by another app. Please close it and try again.");
         } else {
-          setErrorMsg(msg || "Unable to start camera. Try entering the code manually.");
+          setErrorMsg(msg || "Unable to access camera. Please use manual entry.");
         }
         setStatus("error");
       }
@@ -110,173 +107,146 @@ export default function QRScannerModal({ onScan, onClose, title = "Scan QR Code"
       mountedRef.current = false;
       stopAll();
     };
-  }, [stopAll, onScan]);
+  }, []);
 
-  // ── Torch (flashlight) toggle ──────────────────────────────────────
   const toggleTorch = async () => {
     try {
       const stream = videoRef.current?.srcObject;
       if (!stream) return;
       const track = stream.getVideoTracks()[0];
       if (!track) return;
-      const newState = !torchOn;
-      await track.applyConstraints({ advanced: [{ torch: newState }] });
-      setTorchOn(newState);
-    } catch {
-      // Torch not supported — silently ignore
-    }
+      const next = !torchOn;
+      await track.applyConstraints({ advanced: [{ torch: next }] });
+      setTorchOn(next);
+    } catch {}
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
-      style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-2xl overflow-hidden"
-        style={{ width: "100%", maxWidth: "360px" }}
-      >
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+      style={{ backgroundColor: "rgba(0,0,0,0.88)" }}>
+      <div className="bg-white rounded-2xl shadow-2xl overflow-hidden w-full" style={{ maxWidth: 360 }}>
+
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h3 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
+        <div className="flex items-center justify-between px-5 py-4"
+          style={{ background: "linear-gradient(135deg, #0D1F4E, #1B6B35)" }}>
+          <h3 className="font-semibold text-white text-sm flex items-center gap-2">
             <span>📷</span> {title}
           </h3>
-          <button
-            onClick={handleClose}
-            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-800 text-xl leading-none transition"
-          >
+          <button onClick={handleClose}
+            className="w-8 h-8 flex items-center justify-center rounded-full text-white/70 hover:text-white hover:bg-white/20 text-xl transition">
             ✕
           </button>
         </div>
 
-        <div className="p-4 space-y-3">
-          {/* ── STARTING ── */}
+        <div className="p-4">
+          {/* Starting */}
           {status === "starting" && (
             <div className="text-center py-10">
               <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-blue-50 flex items-center justify-center">
                 <span className="text-3xl animate-pulse">📷</span>
               </div>
               <p className="text-gray-700 font-medium text-sm">Starting camera...</p>
-              <p className="text-gray-400 text-xs mt-1">
-                Allow camera access when prompted
-              </p>
+              <p className="text-gray-400 text-xs mt-1">Allow camera access if prompted</p>
             </div>
           )}
 
-          {/* ── ERROR ── */}
+          {/* Error */}
           {status === "error" && (
             <div className="text-center py-6 px-2">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-50 flex items-center justify-center">
-                <span className="text-3xl">📵</span>
-              </div>
-              <p className="text-red-600 font-semibold text-sm mb-2">Camera unavailable</p>
+              <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-red-50 flex items-center justify-center text-2xl">📵</div>
+              <p className="text-red-600 font-semibold text-sm mb-2">Camera Unavailable</p>
               <p className="text-gray-500 text-xs leading-relaxed px-2 mb-4">{errorMsg}</p>
-              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-700 text-left">
-                <p className="font-semibold mb-1">💡 Tips:</p>
-                <ul className="space-y-1 list-disc list-inside">
+              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-700 text-left mb-4">
+                <p className="font-semibold mb-1">💡 Try these:</p>
+                <ul className="space-y-0.5 list-disc list-inside">
                   <li>Use Chrome or Safari on mobile</li>
-                  <li>Make sure camera permission is allowed</li>
-                  <li>Close other apps using the camera</li>
-                  <li>Or type the code manually below</li>
+                  <li>Allow camera permission in browser</li>
+                  <li>Close other apps using camera</li>
                 </ul>
               </div>
-              <button
-                onClick={handleClose}
-                className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm px-6 py-2.5 rounded-xl font-medium transition"
-              >
+              <button onClick={handleClose}
+                className="w-full text-white text-sm px-6 py-2.5 rounded-xl font-medium transition"
+                style={{ background: "linear-gradient(135deg, #0D1F4E, #1B6B35)" }}>
                 Use Manual Entry
               </button>
             </div>
           )}
 
-          {/* ── SCANNED ── */}
+          {/* Scanned */}
           {scanned && (
             <div className="text-center py-10">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-50 flex items-center justify-center">
-                <span className="text-3xl">✅</span>
-              </div>
+              <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-green-50 flex items-center justify-center text-3xl">✅</div>
               <p className="text-green-600 font-bold text-base">QR Code Detected!</p>
               <p className="text-gray-400 text-xs mt-1">Processing...</p>
             </div>
           )}
 
-          {/* ── SCANNING ── */}
-          {status === "scanning" && !scanned && (
-            <>
-              {/* Video container */}
-              <div className="relative rounded-xl overflow-hidden bg-black" style={{ aspectRatio: "4/3" }}>
-                <video
-                  ref={videoRef}
-                  className="w-full h-full object-cover"
-                  muted
-                  playsInline
-                  autoPlay
-                />
+          {/* Camera — always in DOM, hidden when not scanning */}
+          <div style={{ display: status === "scanning" && !scanned ? "block" : "none" }}>
+            <div className="relative rounded-xl overflow-hidden bg-black"
+              style={{ width: "100%", height: 280 }}>
+              {/* 
+                CRITICAL FIX: video must have explicit width/height styles.
+                Do NOT use Tailwind w-full/h-full here — it can cause black screen.
+                Use inline styles so the browser renders it correctly.
+              */}
+              <video
+                ref={videoRef}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                }}
+                muted
+                playsInline
+                autoPlay
+              />
 
-                {/* Dark overlay with hole in center */}
-                <div className="absolute inset-0 pointer-events-none">
-                  {/* Top overlay */}
-                  <div className="absolute top-0 left-0 right-0 bg-black/40" style={{ height: "calc(50% - 80px)" }} />
-                  {/* Bottom overlay */}
-                  <div className="absolute bottom-0 left-0 right-0 bg-black/40" style={{ height: "calc(50% - 80px)" }} />
-                  {/* Left overlay */}
-                  <div className="absolute left-0 bg-black/40" style={{ top: "calc(50% - 80px)", bottom: "calc(50% - 80px)", width: "calc(50% - 80px)" }} />
-                  {/* Right overlay */}
-                  <div className="absolute right-0 bg-black/40" style={{ top: "calc(50% - 80px)", bottom: "calc(50% - 80px)", width: "calc(50% - 80px)" }} />
-
-                  {/* Target box */}
-                  <div
-                    className="absolute"
-                    style={{
-                      top: "50%", left: "50%",
-                      width: 160, height: 160,
-                      transform: "translate(-50%, -50%)",
-                    }}
-                  >
-                    {/* Corners */}
-                    <div className="absolute top-0 left-0 w-8 h-8 border-t-3 border-l-3 border-blue-400 rounded-tl-lg" style={{ borderWidth: "3px 0 0 3px" }} />
-                    <div className="absolute top-0 right-0 w-8 h-8 border-blue-400 rounded-tr-lg" style={{ borderWidth: "3px 3px 0 0" }} />
-                    <div className="absolute bottom-0 left-0 w-8 h-8 border-blue-400 rounded-bl-lg" style={{ borderWidth: "0 0 3px 3px" }} />
-                    <div className="absolute bottom-0 right-0 w-8 h-8 border-blue-400 rounded-br-lg" style={{ borderWidth: "0 3px 3px 0" }} />
-
-                    {/* Animated scan line */}
-                    <div
-                      className="absolute left-1 right-1 bg-blue-400 rounded"
-                      style={{
-                        height: "2px",
-                        animation: "scan 2s ease-in-out infinite",
-                      }}
-                    />
-                  </div>
+              {/* Overlay frame */}
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                {/* Semi-transparent border */}
+                <div style={{ position: "relative", width: 180, height: 180 }}>
+                  {/* Dark overlays around the scan box */}
+                  <div style={{ position: "absolute", inset: 0, boxShadow: "0 0 0 9999px rgba(0,0,0,0.45)" }} />
+                  {/* Corners */}
+                  {[
+                    { top: 0, left: 0, borderTop: "3px solid #C9A227", borderLeft: "3px solid #C9A227", borderRadius: "8px 0 0 0" },
+                    { top: 0, right: 0, borderTop: "3px solid #C9A227", borderRight: "3px solid #C9A227", borderRadius: "0 8px 0 0" },
+                    { bottom: 0, left: 0, borderBottom: "3px solid #C9A227", borderLeft: "3px solid #C9A227", borderRadius: "0 0 0 8px" },
+                    { bottom: 0, right: 0, borderBottom: "3px solid #C9A227", borderRight: "3px solid #C9A227", borderRadius: "0 0 8px 0" },
+                  ].map((style, i) => (
+                    <div key={i} style={{ position: "absolute", width: 28, height: 28, ...style }} />
+                  ))}
+                  {/* Scan line */}
+                  <div style={{
+                    position: "absolute", left: 4, right: 4, height: 2,
+                    background: "linear-gradient(90deg, transparent, #C9A227, transparent)",
+                    animation: "scanline 2s ease-in-out infinite",
+                  }} />
                 </div>
               </div>
+            </div>
 
-              {/* Controls */}
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-gray-400">
-                  Hold QR code in the box
-                </p>
-                <button
-                  onClick={toggleTorch}
-                  className={`text-xs px-3 py-1.5 rounded-lg font-medium transition ${
-                    torchOn
-                      ? "bg-yellow-100 text-yellow-700"
-                      : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                  }`}
-                >
-                  {torchOn ? "🔦 Flash On" : "🔦 Flash"}
-                </button>
-              </div>
-            </>
-          )}
+            {/* Controls row */}
+            <div className="flex items-center justify-between mt-3">
+              <p className="text-xs text-gray-400">Align QR code in the gold frame</p>
+              <button onClick={toggleTorch}
+                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition ${
+                  torchOn ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                }`}>
+                {torchOn ? "🔦 On" : "🔦 Flash"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
       <style>{`
-        @keyframes scan {
-          0%   { top: 4px;  opacity: 1; }
-          50%  { top: calc(100% - 6px); opacity: 0.7; }
-          100% { top: 4px;  opacity: 1; }
+        @keyframes scanline {
+          0%   { top: 8px; opacity: 1; }
+          50%  { top: calc(100% - 10px); opacity: 0.5; }
+          100% { top: 8px; opacity: 1; }
         }
       `}</style>
     </div>
