@@ -1,16 +1,14 @@
 import { useEffect, useState, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import * as XLSX from "xlsx";
 import AdminLayout from "../../components/AdminLayout";
 import StudentDetailModal from "../../components/StudentDetailModal";
-// Add this import at the top with the other firestore imports:
 import {
   listenToStudents,
   addStudent,
   addStudentsBatch,
   getExistingPins,
-  autoDeletePassedOutStudents,
 } from "../../firebase/firestore";
-
 import { getStudentInfo, getBranchFromPin, groupStudentsBySem } from "../../utils/studentUtils";
 
 const EMPTY = { name: "", email: "", pin: "", branch: "CME" };
@@ -24,7 +22,7 @@ function parseStudentsFromWorkbook(workbook) {
     let cols = { pin: 1, name: 2 };
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i].map((c) => (c ? String(c).trim().toLowerCase() : ""));
-      const pinCol = row.findIndex((c) => c.includes("pin"));
+      const pinCol  = row.findIndex((c) => c.includes("pin"));
       const nameCol = row.findIndex((c) => c.includes("name"));
       if (pinCol !== -1 && nameCol !== -1) {
         headerIdx = i;
@@ -36,24 +34,15 @@ function parseStudentsFromWorkbook(workbook) {
     for (let i = dataStart; i < rows.length; i++) {
       const row = rows[i];
       if (!row || row.every((c) => !c)) continue;
-      const pin = row[cols.pin];
+      const pin  = row[cols.pin];
       const name = row[cols.name];
       if (!pin || !name) continue;
       if (String(pin).toLowerCase().includes("pin")) continue;
-      const pinStr = String(pin).trim();
+      const pinStr  = String(pin).trim();
       const nameStr = String(name).trim();
-      const branch = getBranchFromPin(pinStr);
+      const branch  = getBranchFromPin(pinStr);
       const { yearLabel, sem, semNum, isOld } = getStudentInfo(pinStr);
-      results.push({
-        pin: pinStr,
-        name: nameStr,
-        branch,
-        year: yearLabel,
-        currentSem: sem,
-        semNum,
-        isOld,
-        email: "",
-      });
+      results.push({ pin: pinStr, name: nameStr, branch, year: yearLabel, currentSem: sem, semNum, isOld, email: "" });
     }
   });
   return results;
@@ -85,44 +74,60 @@ const SEM_GROUP_ORDER = [
 ];
 
 export default function Students() {
-  const [students, setStudents] = useState([]);
-  const [form, setForm] = useState(EMPTY);
-  const [showForm, setShowForm] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [students, setStudents]           = useState([]);
+  const [form, setForm]                   = useState(EMPTY);
+  const [showForm, setShowForm]           = useState(false);
+  const [loading, setLoading]             = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
- const [search, setSearch] = useState("");
-const [autoDeleteMsg, setAutoDeleteMsg] = useState("");
-
+  const [search, setSearch]               = useState("");
+  const [autoDeleteMsg, setAutoDeleteMsg] = useState("");
 
   // Import state
-  const [showImport, setShowImport] = useState(false);
-  const [preview, setPreview] = useState(null);
-  const [importFile, setImportFile] = useState("");
-  const [importError, setImportError] = useState("");
-  const [importSaving, setImportSaving] = useState(false);
-  const [importDone, setImportDone] = useState(false);
+  const [showImport, setShowImport]       = useState(false);
+  const [preview, setPreview]             = useState(null);
+  const [importFile, setImportFile]       = useState("");
+  const [importError, setImportError]     = useState("");
+  const [importSaving, setImportSaving]   = useState(false);
+  const [importDone, setImportDone]       = useState(false);
   const [importSummary, setImportSummary] = useState("");
-  const [editIdx, setEditIdx] = useState(null);
+  const [editIdx, setEditIdx]             = useState(null);
   const fileRef = useRef();
 
+  // Navigation highlight (from universal search)
+  const location = useLocation();
+  const pendingHighlightRef = useRef(location.state?.highlightId || null);
+
+  // Load students from Firestore
   useEffect(() => {
     const unsub = listenToStudents(setStudents);
     return () => unsub();
   }, []);
 
+  // Auto-open modal when navigated from search
   useEffect(() => {
-  autoDeletePassedOutStudents()
-    .then((deleted) => {
-      if (deleted.length > 0) {
-        setAutoDeleteMsg(
-          `🗑️ ${deleted.length} passed-out student(s) auto-removed (all books returned): ${deleted.join(", ")}`
-        );
+    if (!pendingHighlightRef.current || students.length === 0) return;
+    const found = students.find((s) => s.id === pendingHighlightRef.current);
+    if (found) {
+      pendingHighlightRef.current = null;
+      window.history.replaceState({}, "");
+      setSelectedStudent(found);
+    }
+  }, [students]);
 
-        setTimeout(() => setAutoDeleteMsg(""), 8000);
-      }
-    })
-    .catch(() => {});
-}, []);
+  // Auto-delete passed-out students
+  useEffect(() => {
+    const { autoDeletePassedOutStudents } = require("../../firebase/firestore");
+    autoDeletePassedOutStudents?.()
+      .then((deleted) => {
+        if (deleted?.length > 0) {
+          setAutoDeleteMsg(
+            `🗑️ ${deleted.length} passed-out student(s) auto-removed: ${deleted.join(", ")}`
+          );
+          setTimeout(() => setAutoDeleteMsg(""), 8000);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -140,84 +145,54 @@ const [autoDeleteMsg, setAutoDeleteMsg] = useState("");
   };
 
   const resetImport = () => {
-    setPreview(null);
-    setImportFile("");
-    setImportError("");
-    setImportSummary("");
-    setImportDone(false);
-    setEditIdx(null);
+    setPreview(null); setImportFile(""); setImportError("");
+    setImportSummary(""); setImportDone(false); setEditIdx(null);
     if (fileRef.current) fileRef.current.value = "";
   };
 
   const handleFile = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setImportError("");
-    setPreview(null);
-    setImportDone(false);
-    setImportSummary("");
+    setImportError(""); setPreview(null); setImportDone(false); setImportSummary("");
     setImportFile(file.name);
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
         const wb = XLSX.read(ev.target.result, { type: "array" });
         const rows = parseStudentsFromWorkbook(wb);
-        if (rows.length === 0) {
-          setImportError("No valid records found. Check your file format.");
-          return;
-        }
+        if (rows.length === 0) { setImportError("No valid records found."); return; }
         setPreview(rows);
-      } catch (err) {
-        setImportError("Failed to parse file: " + err.message);
-      }
+      } catch (err) { setImportError("Failed to parse: " + err.message); }
     };
     reader.readAsArrayBuffer(file);
   };
 
   const handleConfirmImport = async () => {
-    setImportSaving(true);
-    setImportError("");
-    setImportSummary("");
+    setImportSaving(true); setImportError(""); setImportSummary("");
     try {
       const existingPins = await getExistingPins();
-      const duplicates = preview.filter((s) => existingPins.has(s.pin));
-      const newStudents = preview.filter((s) => !existingPins.has(s.pin));
-
+      const duplicates   = preview.filter((s) => existingPins.has(s.pin));
+      const newStudents  = preview.filter((s) => !existingPins.has(s.pin));
       if (duplicates.length > 0 && newStudents.length === 0) {
-        setImportError(
-          `All ${duplicates.length} student(s) already exist in the database. Nothing imported.`
-        );
-        setImportSaving(false);
-        return;
+        setImportError(`All ${duplicates.length} student(s) already exist. Nothing imported.`);
+        setImportSaving(false); return;
       }
-
       if (newStudents.length > 0) await addStudentsBatch(newStudents);
-
-      setImportDone(true);
-      setPreview(null);
-
-      if (duplicates.length > 0) {
-        setImportSummary(
-          `✅ ${newStudents.length} imported. ⚠️ ${duplicates.length} skipped (PIN already exists): ` +
-          duplicates.map((s) => s.pin).slice(0, 5).join(", ") +
-          (duplicates.length > 5 ? "..." : "")
-        );
-      } else {
-        setImportSummary(`✅ ${newStudents.length} students imported successfully.`);
-      }
-    } catch (err) {
-      setImportError("Import failed: " + err.message);
-    }
+      setImportDone(true); setPreview(null);
+      setImportSummary(
+        duplicates.length > 0
+          ? `✅ ${newStudents.length} imported. ⚠️ ${duplicates.length} skipped (PIN exists): ${duplicates.map(s => s.pin).slice(0, 5).join(", ")}${duplicates.length > 5 ? "..." : ""}`
+          : `✅ ${newStudents.length} students imported successfully.`
+      );
+    } catch (err) { setImportError("Import failed: " + err.message); }
     setImportSaving(false);
   };
 
-  // Sort by PIN
   const filtered = students
-    .filter(
-      (s) =>
-        s.name?.toLowerCase().includes(search.toLowerCase()) ||
-        s.pin?.toLowerCase().includes(search.toLowerCase()) ||
-        s.branch?.toLowerCase().includes(search.toLowerCase())
+    .filter((s) =>
+      s.name?.toLowerCase().includes(search.toLowerCase()) ||
+      s.pin?.toLowerCase().includes(search.toLowerCase()) ||
+      s.branch?.toLowerCase().includes(search.toLowerCase())
     )
     .sort((a, b) => (a.pin || "").localeCompare(b.pin || ""));
 
@@ -227,13 +202,6 @@ const [autoDeleteMsg, setAutoDeleteMsg] = useState("");
     <AdminLayout>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-        {/* Manual Add Form */}
-        {autoDeleteMsg && (
-  <div className="bg-orange-50 border border-orange-200 text-orange-700 text-sm rounded-xl px-4 py-3 mb-4 flex items-start gap-2">
-    <span className="flex-shrink-0 mt-0.5">ℹ️</span>
-    <span>{autoDeleteMsg}</span>
-  </div>
-)}
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Students</h1>
           <p className="text-gray-500 text-sm mt-1">{students.length} registered students</p>
@@ -254,7 +222,15 @@ const [autoDeleteMsg, setAutoDeleteMsg] = useState("");
         </div>
       </div>
 
-      {/* Manual Add Form */}
+      {/* Auto-delete notification */}
+      {autoDeleteMsg && (
+        <div className="bg-orange-50 border border-orange-200 text-orange-700 text-sm rounded-xl px-4 py-3 mb-4 flex items-start gap-2">
+          <span className="flex-shrink-0 mt-0.5">ℹ️</span>
+          <span>{autoDeleteMsg}</span>
+        </div>
+      )}
+
+      {/* Add Form */}
       {showForm && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
           <h2 className="text-base font-semibold text-gray-800 mb-1">Add New Student</h2>
@@ -311,7 +287,7 @@ const [autoDeleteMsg, setAutoDeleteMsg] = useState("");
         </div>
       )}
 
-      {/* Bulk Import Section */}
+      {/* Import Section */}
       {showImport && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
           <h2 className="text-base font-semibold text-gray-800 mb-1">Import Students from File</h2>
@@ -389,9 +365,7 @@ const [autoDeleteMsg, setAutoDeleteMsg] = useState("");
                             <td className="px-3 py-2">
                               <input value={row.pin}
                                 onChange={(e) => setPreview((p) => p.map((r, i) =>
-                                  i === idx
-                                    ? { ...r, pin: e.target.value, ...getStudentInfo(e.target.value), branch: getBranchFromPin(e.target.value) }
-                                    : r
+                                  i === idx ? { ...r, pin: e.target.value, ...getStudentInfo(e.target.value), branch: getBranchFromPin(e.target.value) } : r
                                 ))}
                                 className="w-full border border-blue-300 rounded px-1 py-0.5 font-mono" />
                             </td>
@@ -449,7 +423,7 @@ const [autoDeleteMsg, setAutoDeleteMsg] = useState("");
           className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </div>
 
-      {/* Students Grouped by Semester */}
+      {/* Students grouped by semester */}
       {filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-100 py-16 text-center text-gray-400">
           No students found.

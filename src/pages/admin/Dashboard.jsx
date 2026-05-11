@@ -1,30 +1,29 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminLayout from "../../components/AdminLayout";
-import { listenToBooks, listenToStudents, listenToTransactions, listenToStaff } from "../../firebase/firestore";
+import {
+  listenToBooks, listenToStudents, listenToTransactions, listenToStaff,
+} from "../../firebase/firestore";
 
 // ── Stat Card ─────────────────────────────────────────────────────────
 function StatCard({ icon, label, value, subtitle, onClick, accent }) {
   const accents = {
-    blue:   { bg: "#EEF2FF", border: "#0D1F4E", icon: "#0D1F4E" },
-    green:  { bg: "#ECFDF5", border: "#1B6B35", icon: "#1B6B35" },
-    gold:   { bg: "#FFFBEB", border: "#C9A227", icon: "#C9A227" },
-    red:    { bg: "#FEF2F2", border: "#DC2626", icon: "#DC2626" },
-    indigo: { bg: "#EEF2FF", border: "#4F46E5", icon: "#4F46E5" },
+    blue:   { bg: "#EEF2FF", border: "#0D1F4E" },
+    green:  { bg: "#ECFDF5", border: "#1B6B35" },
+    gold:   { bg: "#FFFBEB", border: "#C9A227" },
+    red:    { bg: "#FEF2F2", border: "#DC2626" },
+    indigo: { bg: "#EEF2FF", border: "#4F46E5" },
   };
   const a = accents[accent] || accents.blue;
-
   return (
     <button onClick={onClick}
       className="bg-white rounded-xl p-5 w-full text-left group transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 active:scale-95"
       style={{ border: `1px solid ${a.border}20`, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
       <div className="flex items-center gap-4">
         <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0 transition-transform group-hover:scale-110"
-          style={{ background: a.bg }}>
-          {icon}
-        </div>
+          style={{ background: a.bg }}>{icon}</div>
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "#6B7280" }}>{label}</p>
+          <p className="text-xs font-bold uppercase tracking-wide text-gray-500">{label}</p>
           <p className="text-2xl font-bold text-gray-900 leading-tight">{value}</p>
           {subtitle && <p className="text-xs text-gray-400 truncate">{subtitle}</p>}
         </div>
@@ -42,34 +41,27 @@ function QuickViewModal({ title, icon, items, columns, onClose, emptyMsg }) {
       String(item[col.key] || "").toLowerCase().includes(search.toLowerCase())
     )
   );
-
   return (
     <>
-      <div className="fixed inset-0 z-40" style={{ background: "rgba(13,31,78,0.5)", backdropFilter: "blur(3px)" }}
+      <div className="fixed inset-0 z-40"
+        style={{ background: "rgba(13,31,78,0.5)", backdropFilter: "blur(3px)" }}
         onClick={onClose} />
       <div className="fixed inset-x-0 bottom-0 sm:inset-auto sm:right-4 sm:top-4 sm:bottom-4 sm:w-full sm:max-w-2xl bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl z-50 flex flex-col overflow-hidden">
-
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 flex-shrink-0 border-b border-gray-100"
           style={{ background: "linear-gradient(135deg, #0D1F4E, #1B4332)" }}>
           <div className="flex items-center gap-2">
             <span className="text-xl">{icon}</span>
             <h2 className="font-bold text-white text-base">{title}</h2>
-            <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full font-medium">
-              {filtered.length}
-            </span>
+            <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full font-medium">{filtered.length}</span>
           </div>
-          <button onClick={onClose} className="text-white/70 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
+          <button onClick={onClose}
+            className="text-white/70 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
         </div>
-
-        {/* Search */}
         <div className="px-5 py-3 border-b border-gray-100 flex-shrink-0" style={{ background: "#f8f9fa" }}>
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="Search..." autoFocus
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B6B35]/30 focus:border-[#1B6B35]" />
         </div>
-
-        {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {filtered.length === 0 ? (
             <div className="text-center py-16">
@@ -126,13 +118,216 @@ function QuickViewModal({ title, icon, items, columns, onClose, emptyMsg }) {
   );
 }
 
-// ── Dashboard ─────────────────────────────────────────────────────────
+// ── Universal Search Results ─────────────────────────────────────────
+function SearchResults({ studentResults, staffResults, bookResults, txnResults, transactions, globalSearch, onNavigate }) {
+  const hasResults =
+    studentResults.length > 0 || staffResults.length > 0 ||
+    bookResults.length > 0    || txnResults.length > 0;
+
+  // Count active (issued) transactions per person
+  const duesFor = (id) =>
+    transactions.filter(
+      (t) => (t.borrowerId === id || t.studentId === id) && t.status === "issued"
+    ).length;
+
+  if (!hasResults) {
+    return (
+      <div className="mt-4 text-center py-6">
+        <p className="text-3xl mb-2">🔍</p>
+        <p className="text-gray-400 text-sm">No results found for "<strong>{globalSearch}</strong>"</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 space-y-5">
+
+      {/* ── BOOKS ── */}
+      {bookResults.length > 0 && (
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-1">
+            📚 Books <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full ml-1">{bookResults.length}</span>
+          </p>
+          <div className="space-y-1.5">
+            {bookResults.slice(0, 6).map((b) => (
+              <button key={b.id}
+                onClick={() => onNavigate("/admin/books", { highlightId: b.id })}
+                className="w-full flex items-center justify-between rounded-xl px-4 py-3 text-sm text-left transition hover:shadow-sm group"
+                style={{ background: "#f8faff", border: "1px solid #e0e7ff" }}>
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-base flex-shrink-0"
+                    style={{ background: b.available ? "#ECFDF5" : "#FEF2F2" }}>
+                    {b.available ? "📗" : "📕"}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-gray-800 truncate leading-tight">{b.title}</p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {b.author}
+                      {b.accessionNo || b.barcode ? ` · ${b.accessionNo || b.barcode}` : ""}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                    b.available
+                      ? "bg-green-100 text-green-700"
+                      : "bg-red-100 text-red-700"
+                  }`}>
+                    {b.available ? "✓ Available" : "✗ Issued"}
+                  </span>
+                  <span className="text-gray-300 group-hover:text-gray-500 transition text-sm">›</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── STUDENTS ── */}
+      {studentResults.length > 0 && (
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-1">
+            🎓 Students <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full ml-1">{studentResults.length}</span>
+          </p>
+          <div className="space-y-1.5">
+            {studentResults.slice(0, 6).map((s) => {
+              const dues = duesFor(s.id);
+              return (
+                <button key={s.id}
+                  onClick={() => onNavigate("/admin/students", { highlightId: s.id })}
+                  className="w-full flex items-center justify-between rounded-xl px-4 py-3 text-sm text-left transition hover:shadow-sm group"
+                  style={{ background: "#f8faff", border: "1px solid #e0e7ff" }}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                      style={{ background: "linear-gradient(135deg, #0D1F4E, #1B4332)", color: "#C9A227" }}>
+                      {s.name?.charAt(0)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-800 truncate leading-tight">{s.name}</p>
+                      <p className="text-xs text-gray-400 font-mono">{s.pin} · {s.branch} · {s.year}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                    {dues > 0 ? (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700 flex items-center gap-1">
+                        ⚠️ {dues} Due{dues > 1 ? "s" : ""}
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">
+                        ✓ No Dues
+                      </span>
+                    )}
+                    <span className="text-gray-300 group-hover:text-gray-500 transition text-sm">›</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── STAFF ── */}
+      {staffResults.length > 0 && (
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-1">
+            👩‍🏫 Staff <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full ml-1">{staffResults.length}</span>
+          </p>
+          <div className="space-y-1.5">
+            {staffResults.slice(0, 6).map((s) => {
+              const dues = duesFor(s.id);
+              return (
+                <button key={s.id}
+                  onClick={() => onNavigate("/admin/staff", { highlightId: s.id })}
+                  className="w-full flex items-center justify-between rounded-xl px-4 py-3 text-sm text-left transition hover:shadow-sm group"
+                  style={{ background: "#f8faff", border: "1px solid #e0e7ff" }}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                      style={{ background: "linear-gradient(135deg, #312e81, #1B4332)", color: "#a5b4fc" }}>
+                      {s.name?.charAt(0)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-800 truncate leading-tight">{s.name}</p>
+                      <p className="text-xs text-gray-400">{s.designation} · {s.section} · <span className="font-mono">{s.staffId}</span></p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                    {dues > 0 ? (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700 flex items-center gap-1">
+                        ⚠️ {dues} Due{dues > 1 ? "s" : ""}
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">
+                        ✓ No Dues
+                      </span>
+                    )}
+                    <span className="text-gray-300 group-hover:text-gray-500 transition text-sm">›</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── TRANSACTIONS ── */}
+      {txnResults.length > 0 && (
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-1">
+            📋 Transactions <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full ml-1">{txnResults.length}</span>
+          </p>
+          <div className="space-y-1.5">
+            {txnResults.slice(0, 5).map((t) => {
+              const days = t.issueDate?.toDate
+                ? Math.floor((Date.now() - t.issueDate.toDate()) / 86400000)
+                : null;
+              const isOverdue = days !== null && days > 14 && t.status === "issued";
+              return (
+                <button key={t.id}
+                  onClick={() => onNavigate("/admin/reports")}
+                  className="w-full flex items-center justify-between rounded-xl px-4 py-3 text-sm text-left transition hover:shadow-sm group"
+                  style={{ background: "#f8faff", border: "1px solid #e0e7ff" }}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg flex items-center justify-center text-base flex-shrink-0"
+                      style={{ background: t.status === "issued" ? "#FFFBEB" : "#F0FDF4", border: "1px solid " + (t.status === "issued" ? "#fde68a" : "#bbf7d0") }}>
+                      {t.status === "issued" ? "📤" : "📥"}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-800 truncate leading-tight">{t.bookTitle}</p>
+                      <p className="text-xs text-gray-400">
+                        {t.studentName || t.borrowerName} · {t.issueDate?.toDate ? t.issueDate.toDate().toLocaleDateString("en-IN") : ""}
+                        {days !== null ? ` · ${days}d` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                      isOverdue
+                        ? "bg-red-100 text-red-700"
+                        : t.status === "issued"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-green-100 text-green-700"
+                    }`}>
+                      {isOverdue ? "⚠️ Overdue" : t.status === "issued" ? "Issued" : "Returned"}
+                    </span>
+                    <span className="text-gray-300 group-hover:text-gray-500 transition text-sm">›</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Dashboard ────────────────────────────────────────────────────
 export default function AdminDashboard() {
-  const [books, setBooks]             = useState([]);
-  const [students, setStudents]       = useState([]);
-  const [staff, setStaff]             = useState([]);
+  const [books, setBooks]               = useState([]);
+  const [students, setStudents]         = useState([]);
+  const [staff, setStaff]               = useState([]);
   const [transactions, setTransactions] = useState([]);
-  const [modal, setModal]             = useState(null);
+  const [modal, setModal]               = useState(null);
   const [globalSearch, setGlobalSearch] = useState("");
   const navigate = useNavigate();
 
@@ -148,28 +343,62 @@ export default function AdminDashboard() {
   const returnedTxns   = transactions.filter((t) => t.status === "returned");
   const availableBooks = books.filter((b) => b.available);
 
+  // ── Search ───────────────────────────────────────────────────────────
   const gq = globalSearch.trim().toLowerCase();
-  const studentResults = gq.length >= 2 ? students.filter((s) =>
-    s.name?.toLowerCase().includes(gq) || s.pin?.toLowerCase().includes(gq) || s.branch?.toLowerCase().includes(gq)) : [];
-  const staffResults = gq.length >= 2 ? staff.filter((s) =>
-    s.name?.toLowerCase().includes(gq) || s.staffId?.toLowerCase().includes(gq) || s.section?.toLowerCase().includes(gq)) : [];
-  const bookResults = gq.length >= 2 ? books.filter((b) =>
-    b.title?.toLowerCase().includes(gq) || b.author?.toLowerCase().includes(gq) ||
-    String(b.accessionNo || b.barcode || "").toLowerCase().includes(gq)) : [];
-  const txnResults = gq.length >= 2 ? transactions.filter((t) =>
-    t.bookTitle?.toLowerCase().includes(gq) || (t.studentName || t.borrowerName || "").toLowerCase().includes(gq) ||
-    (t.studentPin || t.borrowerId || "").toLowerCase().includes(gq)) : [];
 
+  const studentResults = gq.length >= 2
+    ? students.filter((s) =>
+        s.name?.toLowerCase().includes(gq) ||
+        s.pin?.toLowerCase().includes(gq) ||
+        s.branch?.toLowerCase().includes(gq) ||
+        s.year?.toLowerCase().includes(gq))
+    : [];
+
+  const staffResults = gq.length >= 2
+    ? staff.filter((s) =>
+        s.name?.toLowerCase().includes(gq) ||
+        s.staffId?.toLowerCase().includes(gq) ||
+        s.section?.toLowerCase().includes(gq) ||
+        s.designation?.toLowerCase().includes(gq))
+    : [];
+
+  const bookResults = gq.length >= 2
+    ? books.filter((b) =>
+        b.title?.toLowerCase().includes(gq) ||
+        b.author?.toLowerCase().includes(gq) ||
+        String(b.accessionNo || b.barcode || "").toLowerCase().includes(gq) ||
+        b.subject?.toLowerCase().includes(gq))
+    : [];
+
+  const txnResults = gq.length >= 2
+    ? transactions.filter((t) =>
+        t.bookTitle?.toLowerCase().includes(gq) ||
+        (t.studentName || t.borrowerName || "").toLowerCase().includes(gq) ||
+        (t.studentPin  || t.borrowerId   || "").toLowerCase().includes(gq) ||
+        t.barcode?.toLowerCase().includes(gq))
+    : [];
+
+  // ── Navigate from search result ─────────────────────────────────────
+  const handleSearchNavigate = (path, state) => {
+    setGlobalSearch("");
+    navigate(path, { state });
+  };
+
+  // ── Modal configs ────────────────────────────────────────────────────
   const MODALS = {
     totalBooks: {
       title: "All Books", icon: "📚",
       items: [...books].sort((a, b) => (a.title || "").localeCompare(b.title || "")),
       columns: [
         { key: "accessionNo", label: "Accession", mono: true },
-        { key: "title", label: "Title" },
-        { key: "author", label: "Author" },
-        { key: "available", label: "Status",
-          render: (b) => <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{b.available ? "Available" : "Issued"}</span> },
+        { key: "title",       label: "Title" },
+        { key: "author",      label: "Author" },
+        { key: "available",   label: "Status",
+          render: (b) => (
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+              {b.available ? "Available" : "Issued"}
+            </span>
+          )},
       ],
       emptyMsg: "No books found.",
     },
@@ -178,9 +407,9 @@ export default function AdminDashboard() {
       items: availableBooks,
       columns: [
         { key: "accessionNo", label: "Accession", mono: true },
-        { key: "title", label: "Title" },
-        { key: "author", label: "Author" },
-        { key: "subject", label: "Subject" },
+        { key: "title",       label: "Title" },
+        { key: "author",      label: "Author" },
+        { key: "subject",     label: "Subject" },
       ],
       emptyMsg: "No books available.",
     },
@@ -188,12 +417,12 @@ export default function AdminDashboard() {
       title: "Currently Issued", icon: "📤",
       items: issuedTxns,
       columns: [
-        { key: "bookTitle", label: "Book" },
+        { key: "bookTitle",   label: "Book" },
         { key: "studentName", label: "Borrower" },
-        { key: "studentPin", label: "ID/PIN", mono: true },
-        { key: "issueDate", label: "Issued",
+        { key: "studentPin",  label: "ID/PIN", mono: true },
+        { key: "issueDate",   label: "Issued",
           render: (t) => t.issueDate?.toDate ? t.issueDate.toDate().toLocaleDateString("en-IN") : "—" },
-        { key: "days", label: "Days",
+        { key: "days",        label: "Days",
           render: (t) => {
             if (!t.issueDate?.toDate) return "—";
             const d = Math.floor((Date.now() - t.issueDate.toDate()) / 86400000);
@@ -206,11 +435,11 @@ export default function AdminDashboard() {
       title: "Returned Books", icon: "📥",
       items: returnedTxns,
       columns: [
-        { key: "bookTitle", label: "Book" },
+        { key: "bookTitle",   label: "Book" },
         { key: "studentName", label: "Borrower" },
-        { key: "issueDate", label: "Issued",
+        { key: "issueDate",   label: "Issued",
           render: (t) => t.issueDate?.toDate ? t.issueDate.toDate().toLocaleDateString("en-IN") : "—" },
-        { key: "returnDate", label: "Returned",
+        { key: "returnDate",  label: "Returned",
           render: (t) => t.returnDate?.toDate ? t.returnDate.toDate().toLocaleDateString("en-IN") : "—" },
       ],
       emptyMsg: "No returned transactions.",
@@ -219,10 +448,10 @@ export default function AdminDashboard() {
       title: "All Students", icon: "🎓",
       items: [...students].sort((a, b) => (a.pin || "").localeCompare(b.pin || "")),
       columns: [
-        { key: "pin", label: "PIN", mono: true },
-        { key: "name", label: "Name" },
+        { key: "pin",    label: "PIN",    mono: true },
+        { key: "name",   label: "Name" },
         { key: "branch", label: "Branch" },
-        { key: "year", label: "Year" },
+        { key: "year",   label: "Year" },
       ],
       emptyMsg: "No students registered.",
     },
@@ -230,10 +459,10 @@ export default function AdminDashboard() {
       title: "All Staff", icon: "👩‍🏫",
       items: [...staff].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
       columns: [
-        { key: "staffId", label: "CMS ID", mono: true },
-        { key: "name", label: "Name" },
+        { key: "staffId",     label: "CMS ID",      mono: true },
+        { key: "name",        label: "Name" },
         { key: "designation", label: "Designation" },
-        { key: "section", label: "Section" },
+        { key: "section",     label: "Section" },
       ],
       emptyMsg: "No staff registered.",
     },
@@ -244,22 +473,23 @@ export default function AdminDashboard() {
     .sort((a, b) => (b.issueDate?.seconds || 0) - (a.issueDate?.seconds || 0))
     .slice(0, 8);
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const todayTxns = transactions.filter((t) => t.issueDate?.toDate && t.issueDate.toDate() >= today).length;
+  const todayTxns = transactions.filter(
+    (t) => t.issueDate?.toDate && t.issueDate.toDate() >= today
+  ).length;
 
   return (
     <AdminLayout>
       {/* Page header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-        <div>
-          <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="" className="w-10 h-10 rounded-full object-cover border-2 hidden sm:block"
-              style={{ borderColor: "#C9A227" }} />
-            <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Library Dashboard</h1>
-              <p className="text-gray-400 text-xs mt-0.5">
-                Govt. Polytechnic Anakapalli · {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
-              </p>
-            </div>
+        <div className="flex items-center gap-3">
+          <img src="/logo.png" alt="" className="w-10 h-10 rounded-full object-cover border-2 hidden sm:block"
+            style={{ borderColor: "#C9A227" }} />
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Library Dashboard</h1>
+            <p className="text-gray-400 text-xs mt-0.5">
+              Govt. Polytechnic Anakapalli ·{" "}
+              {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+            </p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -278,60 +508,75 @@ export default function AdminDashboard() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-        <StatCard icon="📚" label="Total Books"   value={books.length}        subtitle={`${availableBooks.length} available`} accent="blue"   onClick={() => setModal("totalBooks")} />
-        <StatCard icon="✅" label="Available"      value={availableBooks.length} subtitle="Ready to issue"                    accent="green"  onClick={() => setModal("available")} />
-        <StatCard icon="📤" label="Issued"         value={issuedTxns.length}   subtitle="Currently out"                      accent="gold"   onClick={() => setModal("issued")} />
-        <StatCard icon="📥" label="Returned"       value={returnedTxns.length} subtitle="All time"                           accent="indigo" onClick={() => setModal("returned")} />
-        <StatCard icon="🎓" label="Students"       value={students.length}     subtitle="Registered"                         accent="green"  onClick={() => setModal("students")} />
-        <StatCard icon="👩‍🏫" label="Staff"         value={staff.length}        subtitle="Members"                            accent="blue"   onClick={() => setModal("staff")} />
+        <StatCard icon="📚" label="Total Books"  value={books.length}          subtitle={`${availableBooks.length} available`} accent="blue"   onClick={() => setModal("totalBooks")} />
+        <StatCard icon="✅" label="Available"     value={availableBooks.length} subtitle="Ready to issue"                      accent="green"  onClick={() => setModal("available")} />
+        <StatCard icon="📤" label="Issued"        value={issuedTxns.length}     subtitle="Currently out"                       accent="gold"   onClick={() => setModal("issued")} />
+        <StatCard icon="📥" label="Returned"      value={returnedTxns.length}   subtitle="All time"                            accent="indigo" onClick={() => setModal("returned")} />
+        <StatCard icon="🎓" label="Students"      value={students.length}       subtitle="Registered"                          accent="green"  onClick={() => setModal("students")} />
+        <StatCard icon="👩‍🏫" label="Staff"        value={staff.length}          subtitle="Members"                             accent="blue"   onClick={() => setModal("staff")} />
       </div>
 
-      {/* Universal Search */}
+      {/* ── Universal Search ── */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
         <div className="flex items-center gap-2 mb-3">
           <span className="text-lg">🔍</span>
           <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Universal Search</h2>
+          <span className="text-xs text-gray-400 font-normal normal-case ml-1">
+            — search books, students, staff, transactions
+          </span>
         </div>
-        <input type="text" placeholder="Search students, staff, books, or transactions..." value={globalSearch}
-          onChange={(e) => setGlobalSearch(e.target.value)}
-          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B6B35]/30 focus:border-[#1B6B35] transition" />
 
-        {globalSearch.trim().length >= 2 && (
-          <div className="mt-4 space-y-4">
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Type at least 2 characters to search..."
+            value={globalSearch}
+            onChange={(e) => setGlobalSearch(e.target.value)}
+            className="w-full border border-gray-200 rounded-xl px-4 py-3 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B6B35]/30 focus:border-[#1B6B35] transition"
+          />
+          {globalSearch && (
+            <button
+              onClick={() => setGlobalSearch("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg leading-none"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Hint when empty */}
+        {!globalSearch && (
+          <div className="flex flex-wrap gap-2 mt-3">
             {[
-              { results: studentResults, icon: "🎓", label: "Students", fields: ["name", "pin", "branch"] },
-              { results: staffResults,   icon: "👩‍🏫", label: "Staff",    fields: ["name", "staffId", "section"] },
-              { results: bookResults,    icon: "📚", label: "Books",     fields: ["title", "accessionNo", "author"] },
-              { results: txnResults,     icon: "📋", label: "Transactions", fields: ["bookTitle", "studentName"] },
-            ].map(({ results, icon, label, fields }) =>
-              results.length > 0 ? (
-                <div key={label}>
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">{icon} {label} ({results.length})</p>
-                  <div className="space-y-1">
-                    {results.slice(0, 5).map((item, i) => (
-                      <div key={i} className="flex items-center justify-between rounded-lg px-4 py-2.5 text-sm"
-                        style={{ background: "#f8f9fa", border: "1px solid #e9ecef" }}>
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="font-semibold text-gray-800 truncate">{item.name || item.title || item.bookTitle}</span>
-                          {(item.pin || item.staffId || item.accessionNo) && (
-                            <span className="text-xs text-gray-400 font-mono flex-shrink-0">
-                              {item.pin || item.staffId || item.accessionNo}
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-xs text-gray-400 flex-shrink-0 ml-2">
-                          {item.branch || item.section || item.status || ""}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null
-            )}
-            {studentResults.length === 0 && staffResults.length === 0 && bookResults.length === 0 && txnResults.length === 0 && (
-              <p className="text-sm text-gray-400 text-center py-4">No results found for "{globalSearch}"</p>
-            )}
+              { label: "Search a book title", icon: "📚" },
+              { label: "Search by student PIN", icon: "🎓" },
+              { label: "Search staff by name", icon: "👩‍🏫" },
+              { label: "Search accession no.", icon: "🔢" },
+            ].map((hint) => (
+              <span key={hint.label}
+                className="text-xs text-gray-400 bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-full">
+                {hint.icon} {hint.label}
+              </span>
+            ))}
           </div>
+        )}
+
+        {/* Results */}
+        {gq.length >= 2 && (
+          <SearchResults
+            studentResults={studentResults}
+            staffResults={staffResults}
+            bookResults={bookResults}
+            txnResults={txnResults}
+            transactions={transactions}
+            globalSearch={globalSearch}
+            onNavigate={handleSearchNavigate}
+          />
+        )}
+
+        {/* Too short */}
+        {gq.length === 1 && (
+          <p className="text-xs text-gray-400 mt-3 text-center">Type one more character to search...</p>
         )}
       </div>
 
@@ -359,6 +604,7 @@ export default function AdminDashboard() {
           </div>
         ) : (
           <>
+            {/* Desktop */}
             <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead style={{ background: "#f8f9fa" }}>
@@ -375,14 +621,18 @@ export default function AdminDashboard() {
                       <td className="px-5 py-3 text-gray-600">{t.studentName || t.borrowerName}</td>
                       <td className="px-5 py-3">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                          t.borrowerType === "staff" ? "bg-indigo-100 text-indigo-700" : "bg-blue-50 text-blue-700"
+                          t.borrowerType === "staff"
+                            ? "bg-indigo-100 text-indigo-700"
+                            : "bg-blue-50 text-blue-700"
                         }`}>
                           {t.borrowerType === "staff" ? "Staff" : "Student"}
                         </span>
                       </td>
                       <td className="px-5 py-3">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                          t.status === "issued" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
+                          t.status === "issued"
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-green-100 text-green-700"
                         }`}>
                           {t.status}
                         </span>
@@ -396,17 +646,21 @@ export default function AdminDashboard() {
               </table>
             </div>
 
+            {/* Mobile */}
             <div className="sm:hidden divide-y divide-gray-100">
               {recent.map((t) => (
                 <div key={t.id} className="px-5 py-3 flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-gray-800 truncate">{t.bookTitle}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      {t.studentName || t.borrowerName} · {t.issueDate?.toDate ? t.issueDate.toDate().toLocaleDateString("en-IN") : ""}
+                      {t.studentName || t.borrowerName} ·{" "}
+                      {t.issueDate?.toDate ? t.issueDate.toDate().toLocaleDateString("en-IN") : ""}
                     </p>
                   </div>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${
-                    t.status === "issued" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
+                    t.status === "issued"
+                      ? "bg-amber-100 text-amber-700"
+                      : "bg-green-100 text-green-700"
                   }`}>
                     {t.status}
                   </span>

@@ -1,34 +1,29 @@
 import { useEffect, useState, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import * as XLSX from "xlsx";
 import AdminLayout from "../../components/AdminLayout";
 import StaffDetailModal from "../../components/StaffDetailModal";
 import {
-  listenToStaff, addStaff, addStaffBatch, getExistingStaffIds, deleteStaff,
+  listenToStaff, addStaff, addStaffBatch, getExistingStaffIds,
 } from "../../firebase/firestore";
 
 const EMPTY = { name: "", staffId: "", designation: "", section: "ECE", email: "" };
 const SECTIONS = ["ECE", "CME", "GENERAL", "OFFICE", "OTHER"];
 
-// ── Parse staff from workbook ─────────────────────────────────────────
 function parseStaffFromWorkbook(workbook) {
   const results = [];
   workbook.SheetNames.forEach((sheetName) => {
     const ws = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
-
     let headerIdx = -1;
     let cols = { name: 1, designation: 2, staffId: 3 };
     let currentSection = "GENERAL";
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i].map((c) => (c ? String(c).trim() : ""));
-      const nameCol = row.findIndex((c) => c.toLowerCase().includes("name"));
-      const desigCol = row.findIndex((c) =>
-        c.toLowerCase().includes("desig") || c.toLowerCase().includes("designation")
-      );
-      const idCol = row.findIndex((c) =>
-        c.toLowerCase().includes("cms") || c.toLowerCase().includes("id")
-      );
+      const nameCol  = row.findIndex((c) => c.toLowerCase().includes("name"));
+      const desigCol = row.findIndex((c) => c.toLowerCase().includes("desig") || c.toLowerCase().includes("designation"));
+      const idCol    = row.findIndex((c) => c.toLowerCase().includes("cms")  || c.toLowerCase().includes("id"));
       if (nameCol !== -1 && idCol !== -1) {
         headerIdx = i;
         cols = { name: nameCol, designation: desigCol !== -1 ? desigCol : 2, staffId: idCol };
@@ -41,43 +36,34 @@ function parseStaffFromWorkbook(workbook) {
     for (let i = headerIdx + 1; i < rows.length; i++) {
       const row = rows[i];
       if (!row || row.every((c) => !c)) continue;
-
-      const rawName = row[cols.name];
-      const rawId   = row[cols.staffId];
+      const rawName  = row[cols.name];
+      const rawId    = row[cols.staffId];
       const rawDesig = row[cols.designation];
 
-      // Detect section header rows
       if (rawName && !rawId) {
         const n = String(rawName).toUpperCase();
-        if (n.includes("ECE"))    { currentSection = "ECE"; continue; }
-        if (n.includes("CME"))    { currentSection = "CME"; continue; }
+        if (n.includes("ECE"))     { currentSection = "ECE";     continue; }
+        if (n.includes("CME"))     { currentSection = "CME";     continue; }
         if (n.includes("GENERAL")) { currentSection = "GENERAL"; continue; }
-        if (n.includes("OFFICE")) { currentSection = "OFFICE"; continue; }
+        if (n.includes("OFFICE"))  { currentSection = "OFFICE";  continue; }
         continue;
       }
 
       if (!rawName || !rawId) continue;
-      const name = String(rawName).trim();
+      const name    = String(rawName).trim();
       const staffId = String(rawId).trim();
-      const desig = rawDesig ? String(rawDesig).trim() : "";
-
-      // Skip vacant rows
+      const desig   = rawDesig ? String(rawDesig).trim() : "";
       if (name.toLowerCase().includes("vacant")) continue;
 
       results.push({
-        name,
-        staffId,
-        designation: desig,
-        section: currentSection,
-        email: "",
-        borrowerType: "staff",
+        name, staffId, designation: desig,
+        section: currentSection, email: "", borrowerType: "staff",
       });
     }
   });
   return results;
 }
 
-// ── Section badge ─────────────────────────────────────────────────────
 function SectionBadge({ section }) {
   const colors = {
     ECE:     "bg-blue-50 text-blue-700",
@@ -104,20 +90,36 @@ export default function Staff() {
   const [search, setSearch]               = useState("");
 
   // Import state
-  const [showImport, setShowImport]   = useState(false);
-  const [preview, setPreview]         = useState(null);
-  const [importFile, setImportFile]   = useState("");
-  const [importError, setImportError] = useState("");
-  const [importSaving, setImportSaving] = useState(false);
-  const [importDone, setImportDone]   = useState(false);
+  const [showImport, setShowImport]       = useState(false);
+  const [preview, setPreview]             = useState(null);
+  const [importFile, setImportFile]       = useState("");
+  const [importError, setImportError]     = useState("");
+  const [importSaving, setImportSaving]   = useState(false);
+  const [importDone, setImportDone]       = useState(false);
   const [importSummary, setImportSummary] = useState("");
-  const [editIdx, setEditIdx]         = useState(null);
+  const [editIdx, setEditIdx]             = useState(null);
   const fileRef = useRef();
 
+  // Navigation highlight (from universal search)
+  const location = useLocation();
+  const pendingHighlightRef = useRef(location.state?.highlightId || null);
+
+  // Load staff from Firestore
   useEffect(() => {
     const unsub = listenToStaff(setStaffList);
     return () => unsub();
   }, []);
+
+  // Auto-open modal when navigated from search
+  useEffect(() => {
+    if (!pendingHighlightRef.current || staffList.length === 0) return;
+    const found = staffList.find((s) => s.id === pendingHighlightRef.current);
+    if (found) {
+      pendingHighlightRef.current = null;
+      window.history.replaceState({}, "");
+      setSelectedStaff(found);
+    }
+  }, [staffList]);
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -159,8 +161,8 @@ export default function Staff() {
     setImportSaving(true); setImportError(""); setImportSummary("");
     try {
       const existingIds = await getExistingStaffIds();
-      const dupes  = preview.filter((s) => existingIds.has(s.staffId));
-      const newOnes = preview.filter((s) => !existingIds.has(s.staffId));
+      const dupes       = preview.filter((s) => existingIds.has(s.staffId));
+      const newOnes     = preview.filter((s) => !existingIds.has(s.staffId));
       if (dupes.length > 0 && newOnes.length === 0) {
         setImportError(`All ${dupes.length} record(s) already exist. Nothing imported.`);
         setImportSaving(false); return;
@@ -176,7 +178,6 @@ export default function Staff() {
     setImportSaving(false);
   };
 
-  // Sort by section then name
   const filtered = staffList
     .filter((s) =>
       s.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -283,7 +284,11 @@ export default function Staff() {
             Expected: S.No | Name of Staff | Designation | CMS ID
           </p>
 
-          {importError && <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-3 mb-3">{importError}</div>}
+          {importError && (
+            <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-3 mb-3">
+              {importError}
+            </div>
+          )}
 
           {importDone && (
             <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3 mb-3">
@@ -297,24 +302,33 @@ export default function Staff() {
               <span className="text-3xl mb-2">📂</span>
               <span className="text-sm font-medium text-gray-600">Click to choose file</span>
               <span className="text-xs text-gray-400 mt-1">.xlsx · .csv · .json</span>
-              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.json" onChange={handleFile} className="hidden" />
+              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.json"
+                onChange={handleFile} className="hidden" />
             </label>
           )}
 
-          {importFile && !importDone && <p className="text-xs text-gray-400 mt-2">📄 {importFile}</p>}
+          {importFile && !importDone && (
+            <p className="text-xs text-gray-400 mt-2">📄 {importFile}</p>
+          )}
 
           {preview && (
             <div className="mt-4">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <p className="text-sm font-semibold text-gray-700">{preview.length} staff ready to import</p>
+                <p className="text-sm font-semibold text-gray-700">
+                  {preview.length} staff ready to import
+                </p>
                 <div className="flex gap-2">
-                  <button onClick={resetImport} className="border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg text-xs hover:bg-gray-50">Cancel</button>
+                  <button onClick={resetImport}
+                    className="border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg text-xs hover:bg-gray-50">
+                    Cancel
+                  </button>
                   <button onClick={handleConfirmImport} disabled={importSaving}
                     className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-1.5 rounded-lg text-xs font-semibold">
                     {importSaving ? "Importing..." : `✓ Import ${preview.length} Staff`}
                   </button>
                 </div>
               </div>
+
               <div className="overflow-x-auto max-h-72 overflow-y-auto border border-gray-100 rounded-lg">
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 sticky top-0">
@@ -335,27 +349,37 @@ export default function Staff() {
                           <>
                             <td className="px-3 py-2">
                               <input value={row.staffId}
-                                onChange={(e) => setPreview((p) => p.map((r, i) => i === idx ? { ...r, staffId: e.target.value } : r))}
+                                onChange={(e) => setPreview((p) => p.map((r, i) =>
+                                  i === idx ? { ...r, staffId: e.target.value } : r
+                                ))}
                                 className="w-full border border-blue-300 rounded px-1 py-0.5 font-mono" />
                             </td>
                             <td className="px-3 py-2">
                               <input value={row.name}
-                                onChange={(e) => setPreview((p) => p.map((r, i) => i === idx ? { ...r, name: e.target.value } : r))}
+                                onChange={(e) => setPreview((p) => p.map((r, i) =>
+                                  i === idx ? { ...r, name: e.target.value } : r
+                                ))}
                                 className="w-full border border-blue-300 rounded px-1 py-0.5" />
                             </td>
                             <td className="px-3 py-2">
                               <input value={row.designation}
-                                onChange={(e) => setPreview((p) => p.map((r, i) => i === idx ? { ...r, designation: e.target.value } : r))}
+                                onChange={(e) => setPreview((p) => p.map((r, i) =>
+                                  i === idx ? { ...r, designation: e.target.value } : r
+                                ))}
                                 className="w-full border border-blue-300 rounded px-1 py-0.5" />
                             </td>
                             <td className="px-3 py-2">
                               <select value={row.section}
-                                onChange={(e) => setPreview((p) => p.map((r, i) => i === idx ? { ...r, section: e.target.value } : r))}
+                                onChange={(e) => setPreview((p) => p.map((r, i) =>
+                                  i === idx ? { ...r, section: e.target.value } : r
+                                ))}
                                 className="border border-blue-300 rounded px-1 py-0.5 bg-white text-xs">
                                 {SECTIONS.map((s) => <option key={s}>{s}</option>)}
                               </select>
                             </td>
-                            <td className="px-3 py-2"><button onClick={() => setEditIdx(null)} className="text-green-600 font-medium">Done</button></td>
+                            <td className="px-3 py-2">
+                              <button onClick={() => setEditIdx(null)} className="text-green-600 font-medium">Done</button>
+                            </td>
                           </>
                         ) : (
                           <>
@@ -363,9 +387,11 @@ export default function Staff() {
                             <td className="px-3 py-2 font-medium text-gray-800">{row.name}</td>
                             <td className="px-3 py-2 text-gray-500">{row.designation}</td>
                             <td className="px-3 py-2"><SectionBadge section={row.section} /></td>
-                            <td className="px-3 py-2 flex gap-2">
-                              <button onClick={() => setEditIdx(idx)} className="text-blue-600 hover:underline">Edit</button>
-                              <button onClick={() => setPreview((p) => p.filter((_, i) => i !== idx))} className="text-red-500 hover:underline">Del</button>
+                            <td className="px-3 py-2">
+                              <div className="flex gap-2">
+                                <button onClick={() => setEditIdx(idx)} className="text-blue-600 hover:underline">Edit</button>
+                                <button onClick={() => setPreview((p) => p.filter((_, i) => i !== idx))} className="text-red-500 hover:underline">Del</button>
+                              </div>
                             </td>
                           </>
                         )}
@@ -465,6 +491,7 @@ export default function Staff() {
         </div>
       )}
 
+      {/* Staff Detail Modal */}
       {selectedStaff && (
         <StaffDetailModal
           staff={selectedStaff}
