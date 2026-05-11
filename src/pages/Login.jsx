@@ -74,7 +74,7 @@ export default function Login() {
         {/* Institution name */}
         <div className="space-y-1">
           <p className="text-[#C9A227] text-xs font-semibold tracking-[0.2em] uppercase">
-            Government of Andhra Pradesh
+             Estd. 2008 · Anakapalli
           </p>
           <h1 className="text-white text-2xl sm:text-3xl font-bold tracking-tight leading-tight">
             Government Polytechnic

@@ -8,6 +8,7 @@ import {
   addStudent,
   addStudentsBatch,
   getExistingPins,
+  autoDeletePassedOutStudents,
 } from "../../firebase/firestore";
 import { getStudentInfo, getBranchFromPin, groupStudentsBySem } from "../../utils/studentUtils";
 
@@ -42,7 +43,10 @@ function parseStudentsFromWorkbook(workbook) {
       const nameStr = String(name).trim();
       const branch  = getBranchFromPin(pinStr);
       const { yearLabel, sem, semNum, isOld } = getStudentInfo(pinStr);
-      results.push({ pin: pinStr, name: nameStr, branch, year: yearLabel, currentSem: sem, semNum, isOld, email: "" });
+      results.push({
+        pin: pinStr, name: nameStr, branch,
+        year: yearLabel, currentSem: sem, semNum, isOld, email: "",
+      });
     }
   });
   return results;
@@ -74,15 +78,14 @@ const SEM_GROUP_ORDER = [
 ];
 
 export default function Students() {
-  const [students, setStudents]           = useState([]);
-  const [form, setForm]                   = useState(EMPTY);
-  const [showForm, setShowForm]           = useState(false);
-  const [loading, setLoading]             = useState(false);
+  const [students, setStudents]               = useState([]);
+  const [form, setForm]                       = useState(EMPTY);
+  const [showForm, setShowForm]               = useState(false);
+  const [loading, setLoading]                 = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
-  const [search, setSearch]               = useState("");
-  const [autoDeleteMsg, setAutoDeleteMsg] = useState("");
+  const [search, setSearch]                   = useState("");
+  const [autoDeleteMsg, setAutoDeleteMsg]     = useState("");
 
-  // Import state
   const [showImport, setShowImport]       = useState(false);
   const [preview, setPreview]             = useState(null);
   const [importFile, setImportFile]       = useState("");
@@ -93,17 +96,17 @@ export default function Students() {
   const [editIdx, setEditIdx]             = useState(null);
   const fileRef = useRef();
 
-  // Navigation highlight (from universal search)
+  // ── Navigation highlight from universal search ──────────────────────
   const location = useLocation();
   const pendingHighlightRef = useRef(location.state?.highlightId || null);
 
-  // Load students from Firestore
+  // Load students
   useEffect(() => {
     const unsub = listenToStudents(setStudents);
     return () => unsub();
   }, []);
 
-  // Auto-open modal when navigated from search
+  // Auto-open modal — waits until Firestore data arrives
   useEffect(() => {
     if (!pendingHighlightRef.current || students.length === 0) return;
     const found = students.find((s) => s.id === pendingHighlightRef.current);
@@ -114,10 +117,9 @@ export default function Students() {
     }
   }, [students]);
 
-  // Auto-delete passed-out students
+  // Auto-delete passed-out students (proper ES module import)
   useEffect(() => {
-    const { autoDeletePassedOutStudents } = require("../../firebase/firestore");
-    autoDeletePassedOutStudents?.()
+    autoDeletePassedOutStudents()
       .then((deleted) => {
         if (deleted?.length > 0) {
           setAutoDeleteMsg(
@@ -138,9 +140,7 @@ export default function Students() {
       await addStudent({ ...form, branch, year: yearLabel, currentSem: sem, semNum, isOld });
       setForm(EMPTY);
       setShowForm(false);
-    } catch (err) {
-      alert("Error: " + err.message);
-    }
+    } catch (err) { alert("Error: " + err.message); }
     setLoading(false);
   };
 
@@ -200,37 +200,29 @@ export default function Students() {
 
   return (
     <AdminLayout>
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Students</h1>
           <p className="text-gray-500 text-sm mt-1">{students.length} registered students</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={() => { setShowImport(!showImport); setShowForm(false); resetImport(); }}
-            className="border border-blue-600 text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg text-sm font-medium transition"
-          >
+          <button onClick={() => { setShowImport(!showImport); setShowForm(false); resetImport(); }}
+            className="border border-blue-600 text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg text-sm font-medium transition">
             {showImport ? "✕ Cancel" : "📂 Import File"}
           </button>
-          <button
-            onClick={() => { setShowForm(!showForm); setShowImport(false); }}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
-          >
+          <button onClick={() => { setShowForm(!showForm); setShowImport(false); }}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
             {showForm ? "✕ Cancel" : "+ Add Student"}
           </button>
         </div>
       </div>
 
-      {/* Auto-delete notification */}
       {autoDeleteMsg && (
         <div className="bg-orange-50 border border-orange-200 text-orange-700 text-sm rounded-xl px-4 py-3 mb-4 flex items-start gap-2">
-          <span className="flex-shrink-0 mt-0.5">ℹ️</span>
-          <span>{autoDeleteMsg}</span>
+          <span className="flex-shrink-0">ℹ️</span><span>{autoDeleteMsg}</span>
         </div>
       )}
 
-      {/* Add Form */}
       {showForm && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
           <h2 className="text-base font-semibold text-gray-800 mb-1">Add New Student</h2>
@@ -260,15 +252,11 @@ export default function Students() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Branch</label>
-              <select
-                value={getBranchFromPin(form.pin) || form.branch}
+              <select value={getBranchFromPin(form.pin) || form.branch}
                 onChange={(e) => setForm({ ...form, branch: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option>CME</option>
-                <option>ECE</option>
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option>CME</option><option>ECE</option>
               </select>
-              <p className="text-xs mt-1 text-gray-400">Auto-detected from PIN</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Email (optional)</label>
@@ -287,72 +275,48 @@ export default function Students() {
         </div>
       )}
 
-      {/* Import Section */}
       {showImport && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
           <h2 className="text-base font-semibold text-gray-800 mb-1">Import Students from File</h2>
-          <p className="text-xs text-gray-400 mb-3">
-            Year & semester auto-calculated from PIN. Supports .xlsx · .csv · .json
-          </p>
+          <p className="text-xs text-gray-400 mb-3">Supports .xlsx · .csv · .json</p>
           <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mb-4 font-mono">
-            Expected columns: Sl.No | Pin Number | Name of the Student
+            Expected: Sl.No | Pin Number | Name of the Student
           </p>
-
-          {importError && (
-            <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-3 mb-3">
-              {importError}
-            </div>
-          )}
-
+          {importError && <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-3 mb-3">{importError}</div>}
           {importDone && (
             <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3 mb-3">
               {importSummary}
               <button onClick={resetImport} className="ml-3 underline text-xs">Import more</button>
             </div>
           )}
-
           {!preview && !importDone && (
             <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 hover:border-blue-400 rounded-xl py-8 cursor-pointer transition">
               <span className="text-3xl mb-2">📂</span>
               <span className="text-sm font-medium text-gray-600">Click to choose file</span>
               <span className="text-xs text-gray-400 mt-1">.xlsx · .csv · .json</span>
-              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.json"
-                onChange={handleFile} className="hidden" />
+              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.json" onChange={handleFile} className="hidden" />
             </label>
           )}
-
-          {importFile && !importDone && (
-            <p className="text-xs text-gray-400 mt-2">📄 {importFile}</p>
-          )}
-
+          {importFile && !importDone && <p className="text-xs text-gray-400 mt-2">📄 {importFile}</p>}
           {preview && (
             <div className="mt-4">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <p className="text-sm font-semibold text-gray-700">
-                  {preview.length} students ready to import
-                </p>
+                <p className="text-sm font-semibold text-gray-700">{preview.length} students ready to import</p>
                 <div className="flex gap-2">
-                  <button onClick={resetImport}
-                    className="border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg text-xs hover:bg-gray-50">
-                    Cancel
-                  </button>
+                  <button onClick={resetImport} className="border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg text-xs">Cancel</button>
                   <button onClick={handleConfirmImport} disabled={importSaving}
-                    className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-1.5 rounded-lg text-xs font-semibold transition">
+                    className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-1.5 rounded-lg text-xs font-semibold">
                     {importSaving ? "Importing..." : `✓ Import ${preview.length} Students`}
                   </button>
                 </div>
               </div>
-
               <div className="overflow-x-auto max-h-72 overflow-y-auto border border-gray-100 rounded-lg">
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr className="text-left text-gray-500">
-                      <th className="px-3 py-2">#</th>
-                      <th className="px-3 py-2">PIN</th>
-                      <th className="px-3 py-2">Name</th>
-                      <th className="px-3 py-2">Branch</th>
-                      <th className="px-3 py-2">Year · Sem</th>
-                      <th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2">#</th><th className="px-3 py-2">PIN</th>
+                      <th className="px-3 py-2">Name</th><th className="px-3 py-2">Branch</th>
+                      <th className="px-3 py-2">Year · Sem</th><th className="px-3 py-2">Status</th>
                       <th className="px-3 py-2">Act</th>
                     </tr>
                   </thead>
@@ -364,28 +328,18 @@ export default function Students() {
                           <>
                             <td className="px-3 py-2">
                               <input value={row.pin}
-                                onChange={(e) => setPreview((p) => p.map((r, i) =>
-                                  i === idx ? { ...r, pin: e.target.value, ...getStudentInfo(e.target.value), branch: getBranchFromPin(e.target.value) } : r
-                                ))}
+                                onChange={(e) => setPreview((p) => p.map((r, i) => i === idx ? { ...r, pin: e.target.value, ...getStudentInfo(e.target.value), branch: getBranchFromPin(e.target.value) } : r))}
                                 className="w-full border border-blue-300 rounded px-1 py-0.5 font-mono" />
                             </td>
                             <td className="px-3 py-2">
                               <input value={row.name}
-                                onChange={(e) => setPreview((p) => p.map((r, i) =>
-                                  i === idx ? { ...r, name: e.target.value } : r
-                                ))}
+                                onChange={(e) => setPreview((p) => p.map((r, i) => i === idx ? { ...r, name: e.target.value } : r))}
                                 className="w-full border border-blue-300 rounded px-1 py-0.5" />
                             </td>
                             <td className="px-3 py-2 text-gray-600">{row.branch}</td>
                             <td className="px-3 py-2 text-gray-600">{row.year} · {row.currentSem}</td>
-                            <td className="px-3 py-2">
-                              {row.isOld
-                                ? <span className="text-gray-400">Passed Out</span>
-                                : <span className="text-green-600">Active</span>}
-                            </td>
-                            <td className="px-3 py-2">
-                              <button onClick={() => setEditIdx(null)} className="text-green-600 font-medium">Done</button>
-                            </td>
+                            <td className="px-3 py-2">{row.isOld ? <span className="text-gray-400">Passed Out</span> : <span className="text-green-600">Active</span>}</td>
+                            <td className="px-3 py-2"><button onClick={() => setEditIdx(null)} className="text-green-600 font-medium">Done</button></td>
                           </>
                         ) : (
                           <>
@@ -416,18 +370,14 @@ export default function Students() {
         </div>
       )}
 
-      {/* Search */}
       <div className="mb-5">
         <input type="text" placeholder="Search by name, PIN, or branch..."
           value={search} onChange={(e) => setSearch(e.target.value)}
           className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </div>
 
-      {/* Students grouped by semester */}
       {filtered.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-100 py-16 text-center text-gray-400">
-          No students found.
-        </div>
+        <div className="bg-white rounded-xl border border-gray-100 py-16 text-center text-gray-400">No students found.</div>
       ) : (
         <div className="space-y-8">
           {SEM_GROUP_ORDER.map((groupName) => {
@@ -435,28 +385,22 @@ export default function Students() {
             if (!group || group.length === 0) return null;
             return (
               <div key={groupName}>
-                {/* Section Divider */}
                 <div className="flex items-center gap-3 mb-3">
                   <div className="h-px flex-1 bg-gray-200" />
                   <span className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-widest px-2">
                     <span>{groupName === "Passed Out" ? "🎓" : groupName === "Unknown" ? "❓" : "📅"}</span>
                     {groupName}
-                    <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full font-medium normal-case">
-                      {group.length}
-                    </span>
+                    <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full font-medium normal-case">{group.length}</span>
                   </span>
                   <div className="h-px flex-1 bg-gray-200" />
                 </div>
 
-                {/* Desktop Table */}
                 <div className="hidden md:block bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b border-gray-100">
                       <tr className="text-left text-gray-500 text-xs uppercase">
-                        <th className="px-5 py-3">Name</th>
-                        <th className="px-5 py-3">PIN</th>
-                        <th className="px-5 py-3">Branch</th>
-                        <th className="px-5 py-3">Year / Sem</th>
+                        <th className="px-5 py-3">Name</th><th className="px-5 py-3">PIN</th>
+                        <th className="px-5 py-3">Branch</th><th className="px-5 py-3">Year / Sem</th>
                         <th className="px-5 py-3">Details</th>
                       </tr>
                     </thead>
@@ -477,7 +421,6 @@ export default function Students() {
                   </table>
                 </div>
 
-                {/* Mobile Cards */}
                 <div className="md:hidden space-y-2">
                   {group.map((s) => (
                     <div key={s.id} onClick={() => setSelectedStudent(s)}
@@ -502,7 +445,6 @@ export default function Students() {
         </div>
       )}
 
-      {/* Student Detail Modal */}
       {selectedStudent && (
         <StudentDetailModal
           student={selectedStudent}

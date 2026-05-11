@@ -11,7 +11,6 @@ function StatCard({ icon, label, value, subtitle, onClick, accent }) {
     blue:   { bg: "#EEF2FF", border: "#0D1F4E" },
     green:  { bg: "#ECFDF5", border: "#1B6B35" },
     gold:   { bg: "#FFFBEB", border: "#C9A227" },
-    red:    { bg: "#FEF2F2", border: "#DC2626" },
     indigo: { bg: "#EEF2FF", border: "#4F46E5" },
   };
   const a = accents[accent] || accents.blue;
@@ -52,7 +51,9 @@ function QuickViewModal({ title, icon, items, columns, onClose, emptyMsg }) {
           <div className="flex items-center gap-2">
             <span className="text-xl">{icon}</span>
             <h2 className="font-bold text-white text-base">{title}</h2>
-            <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full font-medium">{filtered.length}</span>
+            <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full font-medium">
+              {filtered.length}
+            </span>
           </div>
           <button onClick={onClose}
             className="text-white/70 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
@@ -118,203 +119,246 @@ function QuickViewModal({ title, icon, items, columns, onClose, emptyMsg }) {
   );
 }
 
-// ── Universal Search Results ─────────────────────────────────────────
-function SearchResults({ studentResults, staffResults, bookResults, txnResults, transactions, globalSearch, onNavigate }) {
-  const hasResults =
-    studentResults.length > 0 || staffResults.length > 0 ||
-    bookResults.length > 0    || txnResults.length > 0;
+// ── Universal Search Panel ────────────────────────────────────────────
+function UniversalSearch({ students, staff, books, transactions, onNavigate }) {
+  const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
+  const q = query.trim().toLowerCase();
 
-  // Count active (issued) transactions per person
+  const studentResults = q.length >= 2
+    ? students.filter((s) =>
+        s.name?.toLowerCase().includes(q) ||
+        s.pin?.toLowerCase().includes(q) ||
+        s.branch?.toLowerCase().includes(q) ||
+        s.year?.toLowerCase().includes(q)).slice(0, 5)
+    : [];
+
+  const staffResults = q.length >= 2
+    ? staff.filter((s) =>
+        s.name?.toLowerCase().includes(q) ||
+        s.staffId?.toLowerCase().includes(q) ||
+        s.section?.toLowerCase().includes(q) ||
+        s.designation?.toLowerCase().includes(q)).slice(0, 5)
+    : [];
+
+  const bookResults = q.length >= 2
+    ? books.filter((b) =>
+        b.title?.toLowerCase().includes(q) ||
+        b.author?.toLowerCase().includes(q) ||
+        String(b.accessionNo || b.barcode || "").toLowerCase().includes(q) ||
+        b.subject?.toLowerCase().includes(q)).slice(0, 5)
+    : [];
+
+  const txnResults = q.length >= 2
+    ? transactions.filter((t) =>
+        t.bookTitle?.toLowerCase().includes(q) ||
+        (t.studentName || t.borrowerName || "").toLowerCase().includes(q) ||
+        (t.studentPin  || t.borrowerId   || "").toLowerCase().includes(q)).slice(0, 4)
+    : [];
+
+  const hasResults = studentResults.length > 0 || staffResults.length > 0 ||
+    bookResults.length > 0 || txnResults.length > 0;
+
   const duesFor = (id) =>
     transactions.filter(
       (t) => (t.borrowerId === id || t.studentId === id) && t.status === "issued"
     ).length;
 
-  if (!hasResults) {
-    return (
-      <div className="mt-4 text-center py-6">
-        <p className="text-3xl mb-2">🔍</p>
-        <p className="text-gray-400 text-sm">No results found for "<strong>{globalSearch}</strong>"</p>
-      </div>
-    );
-  }
+  const handleNavigate = (path, state) => {
+    setQuery("");
+    onNavigate(path, state);
+  };
 
   return (
-    <div className="mt-4 space-y-5">
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-6">
+      {/* Search bar */}
+      <div className="flex items-center gap-3 px-5 py-4">
+        <span className="text-xl text-gray-400 flex-shrink-0">🔍</span>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setTimeout(() => setFocused(false), 200)}
+          placeholder="Search students, staff, books, transactions..."
+          className="flex-1 text-sm text-gray-800 placeholder-gray-400 focus:outline-none bg-transparent"
+        />
+        {query ? (
+          <button onClick={() => setQuery("")}
+            className="flex-shrink-0 w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 text-sm transition">
+            ✕
+          </button>
+        ) : (
+          <span className="text-xs text-gray-300 flex-shrink-0 hidden sm:block">
+            Min. 2 characters
+          </span>
+        )}
+      </div>
 
-      {/* ── BOOKS ── */}
-      {bookResults.length > 0 && (
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-1">
-            📚 Books <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full ml-1">{bookResults.length}</span>
-          </p>
-          <div className="space-y-1.5">
-            {bookResults.slice(0, 6).map((b) => (
-              <button key={b.id}
-                onClick={() => onNavigate("/admin/books", { highlightId: b.id })}
-                className="w-full flex items-center justify-between rounded-xl px-4 py-3 text-sm text-left transition hover:shadow-sm group"
-                style={{ background: "#f8faff", border: "1px solid #e0e7ff" }}>
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-base flex-shrink-0"
-                    style={{ background: b.available ? "#ECFDF5" : "#FEF2F2" }}>
-                    {b.available ? "📗" : "📕"}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-semibold text-gray-800 truncate leading-tight">{b.title}</p>
-                    <p className="text-xs text-gray-400 truncate">
-                      {b.author}
-                      {b.accessionNo || b.barcode ? ` · ${b.accessionNo || b.barcode}` : ""}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                    b.available
-                      ? "bg-green-100 text-green-700"
-                      : "bg-red-100 text-red-700"
-                  }`}>
-                    {b.available ? "✓ Available" : "✗ Issued"}
-                  </span>
-                  <span className="text-gray-300 group-hover:text-gray-500 transition text-sm">›</span>
-                </div>
-              </button>
-            ))}
-          </div>
+      {/* Divider only when results showing */}
+      {q.length >= 2 && <div className="border-t border-gray-100" />}
+
+      {/* One-character hint */}
+      {q.length === 1 && (
+        <div className="px-5 pb-4 text-xs text-gray-400 text-center">
+          Type one more character...
         </div>
       )}
 
-      {/* ── STUDENTS ── */}
-      {studentResults.length > 0 && (
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-1">
-            🎓 Students <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full ml-1">{studentResults.length}</span>
-          </p>
-          <div className="space-y-1.5">
-            {studentResults.slice(0, 6).map((s) => {
-              const dues = duesFor(s.id);
-              return (
-                <button key={s.id}
-                  onClick={() => onNavigate("/admin/students", { highlightId: s.id })}
-                  className="w-full flex items-center justify-between rounded-xl px-4 py-3 text-sm text-left transition hover:shadow-sm group"
-                  style={{ background: "#f8faff", border: "1px solid #e0e7ff" }}>
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                      style={{ background: "linear-gradient(135deg, #0D1F4E, #1B4332)", color: "#C9A227" }}>
-                      {s.name?.charAt(0)}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-gray-800 truncate leading-tight">{s.name}</p>
-                      <p className="text-xs text-gray-400 font-mono">{s.pin} · {s.branch} · {s.year}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-                    {dues > 0 ? (
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700 flex items-center gap-1">
-                        ⚠️ {dues} Due{dues > 1 ? "s" : ""}
-                      </span>
-                    ) : (
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">
-                        ✓ No Dues
-                      </span>
-                    )}
-                    <span className="text-gray-300 group-hover:text-gray-500 transition text-sm">›</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Results */}
+      {q.length >= 2 && (
+        <div className="px-4 py-3 space-y-4 max-h-[420px] overflow-y-auto">
 
-      {/* ── STAFF ── */}
-      {staffResults.length > 0 && (
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-1">
-            👩‍🏫 Staff <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full ml-1">{staffResults.length}</span>
-          </p>
-          <div className="space-y-1.5">
-            {staffResults.slice(0, 6).map((s) => {
-              const dues = duesFor(s.id);
-              return (
-                <button key={s.id}
-                  onClick={() => onNavigate("/admin/staff", { highlightId: s.id })}
-                  className="w-full flex items-center justify-between rounded-xl px-4 py-3 text-sm text-left transition hover:shadow-sm group"
-                  style={{ background: "#f8faff", border: "1px solid #e0e7ff" }}>
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                      style={{ background: "linear-gradient(135deg, #312e81, #1B4332)", color: "#a5b4fc" }}>
-                      {s.name?.charAt(0)}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-gray-800 truncate leading-tight">{s.name}</p>
-                      <p className="text-xs text-gray-400">{s.designation} · {s.section} · <span className="font-mono">{s.staffId}</span></p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-                    {dues > 0 ? (
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700 flex items-center gap-1">
-                        ⚠️ {dues} Due{dues > 1 ? "s" : ""}
-                      </span>
-                    ) : (
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">
-                        ✓ No Dues
-                      </span>
-                    )}
-                    <span className="text-gray-300 group-hover:text-gray-500 transition text-sm">›</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+          {!hasResults && (
+            <div className="text-center py-6">
+              <p className="text-3xl mb-2">🔍</p>
+              <p className="text-gray-500 text-sm">No results for "<strong>{query}</strong>"</p>
+              <p className="text-gray-400 text-xs mt-1">Try a different name, PIN, or accession number</p>
+            </div>
+          )}
 
-      {/* ── TRANSACTIONS ── */}
-      {txnResults.length > 0 && (
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-1">
-            📋 Transactions <span className="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full ml-1">{txnResults.length}</span>
-          </p>
-          <div className="space-y-1.5">
-            {txnResults.slice(0, 5).map((t) => {
-              const days = t.issueDate?.toDate
-                ? Math.floor((Date.now() - t.issueDate.toDate()) / 86400000)
-                : null;
-              const isOverdue = days !== null && days > 14 && t.status === "issued";
-              return (
-                <button key={t.id}
-                  onClick={() => onNavigate("/admin/reports")}
-                  className="w-full flex items-center justify-between rounded-xl px-4 py-3 text-sm text-left transition hover:shadow-sm group"
-                  style={{ background: "#f8faff", border: "1px solid #e0e7ff" }}>
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-lg flex items-center justify-center text-base flex-shrink-0"
-                      style={{ background: t.status === "issued" ? "#FFFBEB" : "#F0FDF4", border: "1px solid " + (t.status === "issued" ? "#fde68a" : "#bbf7d0") }}>
-                      {t.status === "issued" ? "📤" : "📥"}
+          {/* ── Books ── */}
+          {bookResults.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
+                📚 Books
+              </p>
+              <div className="space-y-1">
+                {bookResults.map((b) => (
+                  <button key={b.id}
+                    onClick={() => handleNavigate("/admin/books", { highlightId: b.id })}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0"
+                      style={{ background: b.available ? "#ECFDF5" : "#FEF2F2" }}>
+                      {b.available ? "📗" : "📕"}
                     </div>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-gray-800 truncate leading-tight">{t.bookTitle}</p>
-                      <p className="text-xs text-gray-400">
-                        {t.studentName || t.borrowerName} · {t.issueDate?.toDate ? t.issueDate.toDate().toLocaleDateString("en-IN") : ""}
-                        {days !== null ? ` · ${days}d` : ""}
-                      </p>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">{b.title}</p>
+                      <p className="text-xs text-gray-400 truncate">{b.author} · {b.accessionNo || b.barcode}</p>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                      isOverdue
-                        ? "bg-red-100 text-red-700"
-                        : t.status === "issued"
-                          ? "bg-amber-100 text-amber-700"
-                          : "bg-green-100 text-green-700"
+                    <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
+                      b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
                     }`}>
-                      {isOverdue ? "⚠️ Overdue" : t.status === "issued" ? "Issued" : "Returned"}
+                      {b.available ? "✓ Available" : "✗ Issued"}
                     </span>
-                    <span className="text-gray-300 group-hover:text-gray-500 transition text-sm">›</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+                    <span className="text-gray-300 group-hover:text-gray-500 text-sm flex-shrink-0">›</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Students ── */}
+          {studentResults.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
+                🎓 Students
+              </p>
+              <div className="space-y-1">
+                {studentResults.map((s) => {
+                  const dues = duesFor(s.id);
+                  return (
+                    <button key={s.id}
+                      onClick={() => handleNavigate("/admin/students", { highlightId: s.id })}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 text-white"
+                        style={{ background: "linear-gradient(135deg, #0D1F4E, #1B4332)" }}>
+                        {s.name?.charAt(0)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-800 truncate">{s.name}</p>
+                        <p className="text-xs text-gray-400 font-mono">{s.pin} · {s.branch} · {s.year}</p>
+                      </div>
+                      <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
+                        dues > 0 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
+                      }`}>
+                        {dues > 0 ? `⚠️ ${dues} Due${dues > 1 ? "s" : ""}` : "✓ No Dues"}
+                      </span>
+                      <span className="text-gray-300 group-hover:text-gray-500 text-sm flex-shrink-0">›</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── Staff ── */}
+          {staffResults.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
+                👩‍🏫 Staff
+              </p>
+              <div className="space-y-1">
+                {staffResults.map((s) => {
+                  const dues = duesFor(s.id);
+                  return (
+                    <button key={s.id}
+                      onClick={() => handleNavigate("/admin/staff", { highlightId: s.id })}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 text-indigo-200"
+                        style={{ background: "linear-gradient(135deg, #312e81, #1e3a5f)" }}>
+                        {s.name?.charAt(0)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-800 truncate">{s.name}</p>
+                        <p className="text-xs text-gray-400">{s.designation} · {s.section} · <span className="font-mono">{s.staffId}</span></p>
+                      </div>
+                      <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
+                        dues > 0 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
+                      }`}>
+                        {dues > 0 ? `⚠️ ${dues} Due${dues > 1 ? "s" : ""}` : "✓ No Dues"}
+                      </span>
+                      <span className="text-gray-300 group-hover:text-gray-500 text-sm flex-shrink-0">›</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── Transactions ── */}
+          {txnResults.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
+                📋 Transactions
+              </p>
+              <div className="space-y-1">
+                {txnResults.map((t) => {
+                  const days = t.issueDate?.toDate
+                    ? Math.floor((Date.now() - t.issueDate.toDate()) / 86400000) : null;
+                  const isOverdue = days !== null && days > 14 && t.status === "issued";
+                  return (
+                    <button key={t.id}
+                      onClick={() => handleNavigate("/admin/reports")}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0"
+                        style={{
+                          background: t.status === "issued" ? "#FFFBEB" : "#F0FDF4",
+                          border: `1px solid ${t.status === "issued" ? "#fde68a" : "#bbf7d0"}`,
+                        }}>
+                        {t.status === "issued" ? "📤" : "📥"}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-800 truncate">{t.bookTitle}</p>
+                        <p className="text-xs text-gray-400 truncate">
+                          {t.studentName || t.borrowerName}
+                          {days !== null ? ` · ${days}d ago` : ""}
+                        </p>
+                      </div>
+                      <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
+                        isOverdue ? "bg-red-100 text-red-700"
+                        : t.status === "issued" ? "bg-amber-100 text-amber-700"
+                        : "bg-green-100 text-green-700"
+                      }`}>
+                        {isOverdue ? "⚠️ Overdue" : t.status === "issued" ? "Issued" : "Returned"}
+                      </span>
+                      <span className="text-gray-300 group-hover:text-gray-500 text-sm flex-shrink-0">›</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -328,7 +372,6 @@ export default function AdminDashboard() {
   const [staff, setStaff]               = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [modal, setModal]               = useState(null);
-  const [globalSearch, setGlobalSearch] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -343,48 +386,6 @@ export default function AdminDashboard() {
   const returnedTxns   = transactions.filter((t) => t.status === "returned");
   const availableBooks = books.filter((b) => b.available);
 
-  // ── Search ───────────────────────────────────────────────────────────
-  const gq = globalSearch.trim().toLowerCase();
-
-  const studentResults = gq.length >= 2
-    ? students.filter((s) =>
-        s.name?.toLowerCase().includes(gq) ||
-        s.pin?.toLowerCase().includes(gq) ||
-        s.branch?.toLowerCase().includes(gq) ||
-        s.year?.toLowerCase().includes(gq))
-    : [];
-
-  const staffResults = gq.length >= 2
-    ? staff.filter((s) =>
-        s.name?.toLowerCase().includes(gq) ||
-        s.staffId?.toLowerCase().includes(gq) ||
-        s.section?.toLowerCase().includes(gq) ||
-        s.designation?.toLowerCase().includes(gq))
-    : [];
-
-  const bookResults = gq.length >= 2
-    ? books.filter((b) =>
-        b.title?.toLowerCase().includes(gq) ||
-        b.author?.toLowerCase().includes(gq) ||
-        String(b.accessionNo || b.barcode || "").toLowerCase().includes(gq) ||
-        b.subject?.toLowerCase().includes(gq))
-    : [];
-
-  const txnResults = gq.length >= 2
-    ? transactions.filter((t) =>
-        t.bookTitle?.toLowerCase().includes(gq) ||
-        (t.studentName || t.borrowerName || "").toLowerCase().includes(gq) ||
-        (t.studentPin  || t.borrowerId   || "").toLowerCase().includes(gq) ||
-        t.barcode?.toLowerCase().includes(gq))
-    : [];
-
-  // ── Navigate from search result ─────────────────────────────────────
-  const handleSearchNavigate = (path, state) => {
-    setGlobalSearch("");
-    navigate(path, { state });
-  };
-
-  // ── Modal configs ────────────────────────────────────────────────────
   const MODALS = {
     totalBooks: {
       title: "All Books", icon: "📚",
@@ -394,11 +395,7 @@ export default function AdminDashboard() {
         { key: "title",       label: "Title" },
         { key: "author",      label: "Author" },
         { key: "available",   label: "Status",
-          render: (b) => (
-            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-              {b.available ? "Available" : "Issued"}
-            </span>
-          )},
+          render: (b) => <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{b.available ? "Available" : "Issued"}</span> },
       ],
       emptyMsg: "No books found.",
     },
@@ -477,6 +474,8 @@ export default function AdminDashboard() {
     (t) => t.issueDate?.toDate && t.issueDate.toDate() >= today
   ).length;
 
+  const handleSearchNavigate = (path, state) => navigate(path, { state });
+
   return (
     <AdminLayout>
       {/* Page header */}
@@ -516,69 +515,14 @@ export default function AdminDashboard() {
         <StatCard icon="👩‍🏫" label="Staff"        value={staff.length}          subtitle="Members"                             accent="blue"   onClick={() => setModal("staff")} />
       </div>
 
-      {/* ── Universal Search ── */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-lg">🔍</span>
-          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Universal Search</h2>
-          <span className="text-xs text-gray-400 font-normal normal-case ml-1">
-            — search books, students, staff, transactions
-          </span>
-        </div>
-
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="Type at least 2 characters to search..."
-            value={globalSearch}
-            onChange={(e) => setGlobalSearch(e.target.value)}
-            className="w-full border border-gray-200 rounded-xl px-4 py-3 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B6B35]/30 focus:border-[#1B6B35] transition"
-          />
-          {globalSearch && (
-            <button
-              onClick={() => setGlobalSearch("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg leading-none"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-
-        {/* Hint when empty */}
-        {!globalSearch && (
-          <div className="flex flex-wrap gap-2 mt-3">
-            {[
-              { label: "Search a book title", icon: "📚" },
-              { label: "Search by student PIN", icon: "🎓" },
-              { label: "Search staff by name", icon: "👩‍🏫" },
-              { label: "Search accession no.", icon: "🔢" },
-            ].map((hint) => (
-              <span key={hint.label}
-                className="text-xs text-gray-400 bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-full">
-                {hint.icon} {hint.label}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Results */}
-        {gq.length >= 2 && (
-          <SearchResults
-            studentResults={studentResults}
-            staffResults={staffResults}
-            bookResults={bookResults}
-            txnResults={txnResults}
-            transactions={transactions}
-            globalSearch={globalSearch}
-            onNavigate={handleSearchNavigate}
-          />
-        )}
-
-        {/* Too short */}
-        {gq.length === 1 && (
-          <p className="text-xs text-gray-400 mt-3 text-center">Type one more character to search...</p>
-        )}
-      </div>
+      {/* Universal Search */}
+      <UniversalSearch
+        students={students}
+        staff={staff}
+        books={books}
+        transactions={transactions}
+        onNavigate={handleSearchNavigate}
+      />
 
       {/* Recent Transactions */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -586,9 +530,7 @@ export default function AdminDashboard() {
           style={{ background: "linear-gradient(135deg, #0D1F4E08, #1B433208)" }}>
           <div>
             <h2 className="text-sm font-bold text-gray-800">Recent Transactions</h2>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {todayTxns} transaction{todayTxns !== 1 ? "s" : ""} today
-            </p>
+            <p className="text-xs text-gray-400 mt-0.5">{todayTxns} transaction{todayTxns !== 1 ? "s" : ""} today</p>
           </div>
           <button onClick={() => setModal("issued")}
             className="text-xs font-bold px-3 py-1.5 rounded-lg transition"
@@ -604,7 +546,6 @@ export default function AdminDashboard() {
           </div>
         ) : (
           <>
-            {/* Desktop */}
             <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead style={{ background: "#f8f9fa" }}>
@@ -621,18 +562,14 @@ export default function AdminDashboard() {
                       <td className="px-5 py-3 text-gray-600">{t.studentName || t.borrowerName}</td>
                       <td className="px-5 py-3">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                          t.borrowerType === "staff"
-                            ? "bg-indigo-100 text-indigo-700"
-                            : "bg-blue-50 text-blue-700"
+                          t.borrowerType === "staff" ? "bg-indigo-100 text-indigo-700" : "bg-blue-50 text-blue-700"
                         }`}>
                           {t.borrowerType === "staff" ? "Staff" : "Student"}
                         </span>
                       </td>
                       <td className="px-5 py-3">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                          t.status === "issued"
-                            ? "bg-amber-100 text-amber-700"
-                            : "bg-green-100 text-green-700"
+                          t.status === "issued" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
                         }`}>
                           {t.status}
                         </span>
@@ -645,8 +582,6 @@ export default function AdminDashboard() {
                 </tbody>
               </table>
             </div>
-
-            {/* Mobile */}
             <div className="sm:hidden divide-y divide-gray-100">
               {recent.map((t) => (
                 <div key={t.id} className="px-5 py-3 flex items-center justify-between gap-3">
@@ -658,9 +593,7 @@ export default function AdminDashboard() {
                     </p>
                   </div>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${
-                    t.status === "issued"
-                      ? "bg-amber-100 text-amber-700"
-                      : "bg-green-100 text-green-700"
+                    t.status === "issued" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
                   }`}>
                     {t.status}
                   </span>
