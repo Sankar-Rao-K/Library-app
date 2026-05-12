@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import * as XLSX from "xlsx";
 import AdminLayout from "../../components/AdminLayout";
 import StudentDetailModal from "../../components/StudentDetailModal";
+import QRDisplayModal from "../../components/QRDisplayModal";
 import {
   listenToStudents,
   addStudent,
@@ -85,6 +86,7 @@ export default function Students() {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [search, setSearch]                   = useState("");
   const [autoDeleteMsg, setAutoDeleteMsg]     = useState("");
+  const [newStudentQR, setNewStudentQR] = useState(null);
 
   const [showImport, setShowImport]       = useState(false);
   const [preview, setPreview]             = useState(null);
@@ -132,17 +134,18 @@ export default function Students() {
   }, []);
 
   const handleAdd = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const branch = getBranchFromPin(form.pin) || form.branch;
-      const { yearLabel, sem, semNum, isOld } = getStudentInfo(form.pin);
-      await addStudent({ ...form, branch, year: yearLabel, currentSem: sem, semNum, isOld });
-      setForm(EMPTY);
-      setShowForm(false);
-    } catch (err) { alert("Error: " + err.message); }
-    setLoading(false);
-  };
+  e.preventDefault();
+  setLoading(true);
+  try {
+    const branch = getBranchFromPin(form.pin) || form.branch;
+    const { yearLabel, sem, semNum, isOld } = getStudentInfo(form.pin);
+    await addStudent({ ...form, branch, year: yearLabel, currentSem: sem, semNum, isOld });
+    setNewStudentQR({ ...form, branch }); // show QR
+    setForm(EMPTY);
+    setShowForm(false);
+  } catch (err) { alert("Error: " + err.message); }
+  setLoading(false);
+};
 
   const resetImport = () => {
     setPreview(null); setImportFile(""); setImportError("");
@@ -268,7 +271,7 @@ export default function Students() {
             <div className="sm:col-span-2">
               <button type="submit" disabled={loading}
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2 rounded-lg text-sm font-medium transition">
-                {loading ? "Saving..." : "Save Student"}
+                {loading ? "Saving..." : "Save Student & Generate QR"}
               </button>
             </div>
           </form>

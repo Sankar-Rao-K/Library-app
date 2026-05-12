@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import * as XLSX from "xlsx";
 import AdminLayout from "../../components/AdminLayout";
 import StaffDetailModal from "../../components/StaffDetailModal";
+import QRDisplayModal from "../../components/QRDisplayModal";
 import {
   listenToStaff, addStaff, addStaffBatch, getExistingStaffIds,
 } from "../../firebase/firestore";
@@ -87,6 +88,7 @@ export default function Staff() {
   const [showForm, setShowForm]           = useState(false);
   const [loading, setLoading]             = useState(false);
   const [selectedStaff, setSelectedStaff] = useState(null);
+  const [newStaffQR, setNewStaffQR] = useState(null);
   const [search, setSearch]               = useState("");
 
   // Import state
@@ -122,17 +124,22 @@ export default function Staff() {
   }, [staffList]);
 
   const handleAdd = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await addStaff({ ...form, borrowerType: "staff" });
-      setForm(EMPTY);
-      setShowForm(false);
-    } catch (err) {
-      alert("Error: " + err.message);
-    }
-    setLoading(false);
-  };
+  e.preventDefault();
+  setLoading(true);
+
+  try {
+    await addStaff({ ...form, borrowerType: "staff" });
+
+    setNewStaffQR({ ...form }); // show QR
+
+    setForm(EMPTY);
+    setShowForm(false);
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+
+  setLoading(false);
+};
 
   const resetImport = () => {
     setPreview(null); setImportFile(""); setImportError("");
@@ -201,6 +208,13 @@ export default function Staff() {
 
   return (
     <AdminLayout>
+       {newStaffQR && (
+      <QRDisplayModal
+        item={newStaffQR}
+        type="staff"
+        onClose={() => setNewStaffQR(null)}
+      />
+    )}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
@@ -266,7 +280,7 @@ export default function Staff() {
             <div className="sm:col-span-2">
               <button type="submit" disabled={loading}
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2 rounded-lg text-sm font-medium transition">
-                {loading ? "Saving..." : "Save Staff Member"}
+                {loading ? "Saving..." : "Save Staff & Generate QR"}
               </button>
             </div>
           </form>
