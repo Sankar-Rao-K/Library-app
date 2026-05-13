@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import AdminLayout from "../../components/AdminLayout";
+import { smartSearch } from "../../utils/searchUtils";
 import { listenToBooks, listenToStudents, listenToStaff } from "../../firebase/firestore";
 
 export default function QRCodes() {
@@ -19,27 +20,19 @@ export default function QRCodes() {
 
   const q = search.toLowerCase();
 
-  const filteredBooks = books.filter((b) =>
-    b.title?.toLowerCase().includes(q) ||
-    String(b.accessionNo || b.barcode || "").toLowerCase().includes(q) ||
-    b.author?.toLowerCase().includes(q)
-  );
+const filteredBooks = smartSearch(books, search, ["title", "author", "accessionNo", "barcode"]);
 
-  const filteredStudents = [...students]
-    .sort((a, b) => (a.pin || "").localeCompare(b.pin || ""))
-    .filter((s) =>
-      s.name?.toLowerCase().includes(q) ||
-      s.pin?.toLowerCase().includes(q) ||
-      s.branch?.toLowerCase().includes(q)
-    );
+ const filteredStudents = smartSearch(
+  [...students].sort((a, b) => (a.pin || "").localeCompare(b.pin || "")),
+  search,
+  ["name", "pin", "branch"]
+);
 
-  const filteredStaff = [...staffList]
-    .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
-    .filter((s) =>
-      s.name?.toLowerCase().includes(q) ||
-      s.staffId?.toLowerCase().includes(q) ||
-      s.section?.toLowerCase().includes(q)
-    );
+ const filteredStaff = smartSearch(
+  [...staffList].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+  search,
+  ["name", "staffId", "section", "designation"]
+);
 
   // Current list for empty state check
   const currentList = tab === "books"

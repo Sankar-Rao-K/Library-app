@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import AdminLayout from "../../components/AdminLayout";
 import StaffDetailModal from "../../components/StaffDetailModal";
 import QRDisplayModal from "../../components/QRDisplayModal";
+import { smartSearch } from "../../utils/searchUtils";
 import {
   listenToStaff, addStaff, addStaffBatch, getExistingStaffIds,
 } from "../../firebase/firestore";
@@ -185,18 +186,15 @@ export default function Staff() {
     setImportSaving(false);
   };
 
-  const filtered = staffList
-    .filter((s) =>
-      s.name?.toLowerCase().includes(search.toLowerCase()) ||
-      s.staffId?.toLowerCase().includes(search.toLowerCase()) ||
-      s.designation?.toLowerCase().includes(search.toLowerCase()) ||
-      s.section?.toLowerCase().includes(search.toLowerCase())
-    )
-    .sort((a, b) => {
-      const si = SECTION_ORDER.indexOf(a.section) - SECTION_ORDER.indexOf(b.section);
-      if (si !== 0) return si;
-      return (a.name || "").localeCompare(b.name || "");
-    });
+  const filtered = smartSearch(
+  staffList,
+  search,
+  ["name", "staffId", "designation", "section"]
+).sort((a, b) => {
+  const si = SECTION_ORDER.indexOf(a.section) - SECTION_ORDER.indexOf(b.section);
+  if (si !== 0) return si;
+  return (a.name || "").localeCompare(b.name || "");
+});
 
   const grouped = {};
   SECTION_ORDER.forEach((s) => { grouped[s] = []; });

@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import * as XLSX from "xlsx";
 import AdminLayout from "../../components/AdminLayout";
 import QRDisplayModal from "../../components/QRDisplayModal";
+import { smartSearch } from "../../utils/searchUtils";
 import { listenToBooks, addBook, addBooksBatch } from "../../firebase/firestore";
 
 const EMPTY = { title: "", author: "", barcode: "", subject: "", totalCopies: 1 };
@@ -132,13 +133,11 @@ export default function Books() {
     setImportSaving(false);
   };
 
-  const filtered = books.filter((b) =>
-    b.title?.toLowerCase().includes(search.toLowerCase()) ||
-    b.author?.toLowerCase().includes(search.toLowerCase()) ||
-    String(b.barcode || b.accessionNo || "").toLowerCase().includes(search.toLowerCase()) ||
-    b.subject?.toLowerCase().includes(search.toLowerCase())
-  );
-
+  const filtered = smartSearch(
+  books,
+  search,
+  ["title", "author", "accessionNo", "barcode", "subject", "genre"]
+);
   const { bySubject, bbBooks } = groupBooks(filtered);
   const subjectKeys = Object.keys(bySubject).sort();
   const hasAnyBooks = subjectKeys.some((k) => bySubject[k].length > 0) || bbBooks.length > 0;

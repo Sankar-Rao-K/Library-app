@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import AdminLayout from "../../components/AdminLayout";
 import StudentDetailModal from "../../components/StudentDetailModal";
 import QRDisplayModal from "../../components/QRDisplayModal";
+import { smartSearch } from "../../utils/searchUtils";
 import {
   listenToStudents,
   addStudent,
@@ -191,13 +192,11 @@ export default function Students() {
     setImportSaving(false);
   };
 
-  const filtered = students
-    .filter((s) =>
-      s.name?.toLowerCase().includes(search.toLowerCase()) ||
-      s.pin?.toLowerCase().includes(search.toLowerCase()) ||
-      s.branch?.toLowerCase().includes(search.toLowerCase())
-    )
-    .sort((a, b) => (a.pin || "").localeCompare(b.pin || ""));
+const filtered = smartSearch(
+  students,
+  search,
+  ["name", "pin", "branch", "year", "currentSem"]
+).sort((a, b) => (a.pin || "").localeCompare(b.pin || ""));
 
   const grouped = groupStudentsBySem(filtered);
 
@@ -374,7 +373,7 @@ export default function Students() {
       )}
 
       <div className="mb-5">
-        <input type="text" placeholder="Search by name, PIN, or branch..."
+        <input type="text" placeholder="Search by name, PIN, branch... (smart search)"
           value={search} onChange={(e) => setSearch(e.target.value)}
           className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </div>

@@ -4,6 +4,7 @@ import AdminLayout from "../../components/AdminLayout";
 import {
   listenToBooks, listenToStudents, listenToTransactions, listenToStaff,
 } from "../../firebase/firestore";
+import { smartSearch, tokenize } from "../../utils/searchUtils";
 
 // ── Stat Card ─────────────────────────────────────────────────────────
 function StatCard({ icon, label, value, subtitle, onClick, accent }) {
@@ -36,9 +37,12 @@ function StatCard({ icon, label, value, subtitle, onClick, accent }) {
 function QuickViewModal({ title, icon, items, columns, onClose, emptyMsg }) {
   const [search, setSearch] = useState("");
   const filtered = items.filter((item) =>
-    columns.some((col) =>
-      String(item[col.key] || "").toLowerCase().includes(search.toLowerCase())
-    )
+    columns.some((col) => {
+      const val = col.render
+        ? String(item[col.key] || "")
+        : String(item[col.key] || "");
+      return val.toLowerCase().includes(search.toLowerCase());
+    })
   );
   return (
     <>
@@ -51,9 +55,7 @@ function QuickViewModal({ title, icon, items, columns, onClose, emptyMsg }) {
           <div className="flex items-center gap-2">
             <span className="text-xl">{icon}</span>
             <h2 className="font-bold text-white text-base">{title}</h2>
-            <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full font-medium">
-              {filtered.length}
-            </span>
+            <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full font-medium">{filtered.length}</span>
           </div>
           <button onClick={onClose}
             className="text-white/70 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">✕</button>
@@ -66,8 +68,9 @@ function QuickViewModal({ title, icon, items, columns, onClose, emptyMsg }) {
         <div className="flex-1 overflow-y-auto">
           {filtered.length === 0 ? (
             <div className="text-center py-16">
-              <p className="text-4xl mb-3">📋</p>
-              <p className="text-gray-400 text-sm">{emptyMsg || "No items found."}</p>
+              <p className="text-4xl mb-3">🔍</p>
+              <p className="text-gray-500 font-medium text-sm">No records found</p>
+              <p className="text-gray-400 text-xs mt-1">Try a different search term</p>
             </div>
           ) : (
             <>
@@ -119,41 +122,26 @@ function QuickViewModal({ title, icon, items, columns, onClose, emptyMsg }) {
   );
 }
 
-// ── Universal Search Panel ────────────────────────────────────────────
+// ── Universal Search ──────────────────────────────────────────────────
 function UniversalSearch({ students, staff, books, transactions, onNavigate }) {
   const [query, setQuery] = useState("");
-  const [focused, setFocused] = useState(false);
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
+  const tokens = tokenize(q);
 
-  const studentResults = q.length >= 2
-    ? students.filter((s) =>
-        s.name?.toLowerCase().includes(q) ||
-        s.pin?.toLowerCase().includes(q) ||
-        s.branch?.toLowerCase().includes(q) ||
-        s.year?.toLowerCase().includes(q)).slice(0, 5)
+  const studentResults = tokens.length >= 1
+    ? smartSearch(students, q, ["name", "pin", "branch", "year"]).slice(0, 5)
     : [];
-
-  const staffResults = q.length >= 2
-    ? staff.filter((s) =>
-        s.name?.toLowerCase().includes(q) ||
-        s.staffId?.toLowerCase().includes(q) ||
-        s.section?.toLowerCase().includes(q) ||
-        s.designation?.toLowerCase().includes(q)).slice(0, 5)
+  const staffResults = tokens.length >= 1
+    ? smartSearch(staff, q, ["name", "staffId", "section", "designation"]).slice(0, 5)
     : [];
-
-  const bookResults = q.length >= 2
-    ? books.filter((b) =>
-        b.title?.toLowerCase().includes(q) ||
-        b.author?.toLowerCase().includes(q) ||
-        String(b.accessionNo || b.barcode || "").toLowerCase().includes(q) ||
-        b.subject?.toLowerCase().includes(q)).slice(0, 5)
+  const bookResults = tokens.length >= 1
+    ? smartSearch(books, q, ["title", "author", "accessionNo", "barcode", "subject"]).slice(0, 5)
     : [];
-
-  const txnResults = q.length >= 2
-    ? transactions.filter((t) =>
-        t.bookTitle?.toLowerCase().includes(q) ||
-        (t.studentName || t.borrowerName || "").toLowerCase().includes(q) ||
-        (t.studentPin  || t.borrowerId   || "").toLowerCase().includes(q)).slice(0, 4)
+  const txnResults = tokens.length >= 1
+    ? smartSearch(
+        transactions, q,
+        ["bookTitle", "studentName", "borrowerName", "studentPin", "borrowerId", "barcode"]
+      ).slice(0, 4)
     : [];
 
   const hasResults = studentResults.length > 0 || staffResults.length > 0 ||
@@ -178,8 +166,6 @@ function UniversalSearch({ students, staff, books, transactions, onNavigate }) {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => setFocused(false), 200)}
           placeholder="Search students, staff, books, transactions..."
           className="flex-1 text-sm text-gray-800 placeholder-gray-400 focus:outline-none bg-transparent"
         />
@@ -190,176 +176,375 @@ function UniversalSearch({ students, staff, books, transactions, onNavigate }) {
           </button>
         ) : (
           <span className="text-xs text-gray-300 flex-shrink-0 hidden sm:block">
-            Min. 2 characters
+            Smart search — fuzzy match
           </span>
         )}
       </div>
 
-      {/* Divider only when results showing */}
-      {q.length >= 2 && <div className="border-t border-gray-100" />}
-
-      {/* One-character hint */}
-      {q.length === 1 && (
-        <div className="px-5 pb-4 text-xs text-gray-400 text-center">
-          Type one more character...
-        </div>
-      )}
+      {q.length > 0 && <div className="border-t border-gray-100" />}
 
       {/* Results */}
-      {q.length >= 2 && (
+      {q.length > 0 && (
         <div className="px-4 py-3 space-y-4 max-h-[420px] overflow-y-auto">
-
-          {!hasResults && (
-            <div className="text-center py-6">
+          {!hasResults ? (
+            <div className="text-center py-8">
               <p className="text-3xl mb-2">🔍</p>
-              <p className="text-gray-500 text-sm">No results for "<strong>{query}</strong>"</p>
-              <p className="text-gray-400 text-xs mt-1">Try a different name, PIN, or accession number</p>
-            </div>
-          )}
-
-          {/* ── Books ── */}
-          {bookResults.length > 0 && (
-            <div>
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
-                📚 Books
+              <p className="text-gray-600 font-semibold text-sm">No records found</p>
+              <p className="text-gray-400 text-xs mt-1">
+                Nothing matches "<strong>{query}</strong>". Try a different name, PIN, or accession number.
               </p>
-              <div className="space-y-1">
-                {bookResults.map((b) => (
-                  <button key={b.id}
-                    onClick={() => handleNavigate("/admin/books", { highlightId: b.id })}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0"
-                      style={{ background: b.available ? "#ECFDF5" : "#FEF2F2" }}>
-                      {b.available ? "📗" : "📕"}
+            </div>
+          ) : (
+            <>
+              {/* Books */}
+              {bookResults.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">📚 Books</p>
+                  <div className="space-y-1">
+                    {bookResults.map((b) => (
+                      <button key={b.id}
+                        onClick={() => handleNavigate("/admin/books", { highlightId: b.id })}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0"
+                          style={{ background: b.available ? "#ECFDF5" : "#FEF2F2" }}>
+                          {b.available ? "📗" : "📕"}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-800 truncate">{b.title}</p>
+                          <p className="text-xs text-gray-400 truncate">{b.author} · {b.accessionNo || b.barcode}</p>
+                        </div>
+                        <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
+                          b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                        }`}>
+                          {b.available ? "✓ Available" : "✗ Issued"}
+                        </span>
+                        <span className="text-gray-300 group-hover:text-gray-500 text-sm flex-shrink-0">›</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Students */}
+              {studentResults.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">🎓 Students</p>
+                  <div className="space-y-1">
+                    {studentResults.map((s) => {
+                      const dues = duesFor(s.id);
+                      return (
+                        <button key={s.id}
+                          onClick={() => handleNavigate("/admin/students", { highlightId: s.id })}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 text-white"
+                            style={{ background: "linear-gradient(135deg, #0D1F4E, #1B4332)" }}>
+                            {s.name?.charAt(0)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-800 truncate">{s.name}</p>
+                            <p className="text-xs text-gray-400 font-mono">{s.pin} · {s.branch} · {s.year}</p>
+                          </div>
+                          <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
+                            dues > 0 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
+                          }`}>
+                            {dues > 0 ? `⚠️ ${dues} Due${dues > 1 ? "s" : ""}` : "✓ No Dues"}
+                          </span>
+                          <span className="text-gray-300 group-hover:text-gray-500 text-sm flex-shrink-0">›</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Staff */}
+              {staffResults.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">👩‍🏫 Staff</p>
+                  <div className="space-y-1">
+                    {staffResults.map((s) => {
+                      const dues = duesFor(s.id);
+                      return (
+                        <button key={s.id}
+                          onClick={() => handleNavigate("/admin/staff", { highlightId: s.id })}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 text-indigo-200"
+                            style={{ background: "linear-gradient(135deg, #312e81, #1e3a5f)" }}>
+                            {s.name?.charAt(0)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-800 truncate">{s.name}</p>
+                            <p className="text-xs text-gray-400">{s.designation} · {s.section} · <span className="font-mono">{s.staffId}</span></p>
+                          </div>
+                          <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
+                            dues > 0 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
+                          }`}>
+                            {dues > 0 ? `⚠️ ${dues} Due${dues > 1 ? "s" : ""}` : "✓ No Dues"}
+                          </span>
+                          <span className="text-gray-300 group-hover:text-gray-500 text-sm flex-shrink-0">›</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Transactions */}
+              {txnResults.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">📋 Transactions</p>
+                  <div className="space-y-1">
+                    {txnResults.map((t) => {
+                      const days = t.issueDate?.toDate
+                        ? Math.floor((Date.now() - t.issueDate.toDate()) / 86400000) : null;
+                      const isOverdue = days !== null && days > 14 && t.status === "issued";
+                      return (
+                        <button key={t.id}
+                          onClick={() => handleNavigate("/admin/reports")}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0"
+                            style={{
+                              background: t.status === "issued" ? "#FFFBEB" : "#F0FDF4",
+                              border: `1px solid ${t.status === "issued" ? "#fde68a" : "#bbf7d0"}`,
+                            }}>
+                            {t.status === "issued" ? "📤" : "📥"}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-800 truncate">{t.bookTitle}</p>
+                            <p className="text-xs text-gray-400 truncate">
+                              {t.studentName || t.borrowerName}
+                              {days !== null ? ` · ${days}d ago` : ""}
+                            </p>
+                          </div>
+                          <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
+                            isOverdue ? "bg-red-100 text-red-700"
+                            : t.status === "issued" ? "bg-amber-100 text-amber-700"
+                            : "bg-green-100 text-green-700"
+                          }`}>
+                            {isOverdue ? "⚠️ Overdue" : t.status === "issued" ? "Issued" : "Returned"}
+                          </span>
+                          <span className="text-gray-300 group-hover:text-gray-500 text-sm flex-shrink-0">›</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Transaction Filters + Table ───────────────────────────────────────
+function TransactionTable({ transactions, onViewIssued }) {
+  const [typeFilter, setTypeFilter]     = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [txnSearch, setTxnSearch]       = useState("");
+
+  let filtered = [...transactions]
+    .sort((a, b) => (b.issueDate?.seconds || 0) - (a.issueDate?.seconds || 0));
+
+  // Apply type filter
+  if (typeFilter !== "all") {
+    filtered = filtered.filter((t) => (t.borrowerType || "student") === typeFilter);
+  }
+
+  // Apply status filter
+  if (statusFilter !== "all") {
+    filtered = filtered.filter((t) => t.status === statusFilter);
+  }
+
+  // Apply smart search
+  if (txnSearch.trim()) {
+    filtered = smartSearch(
+      filtered, txnSearch,
+      ["bookTitle", "studentName", "borrowerName", "studentPin", "borrowerId", "barcode"]
+    );
+  }
+
+  const shown = filtered.slice(0, 10);
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-gray-100"
+        style={{ background: "linear-gradient(135deg, #0D1F4E08, #1B433208)" }}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-gray-800">Recent Transactions</h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Showing {shown.length} of {filtered.length} records
+            </p>
+          </div>
+          <button onClick={onViewIssued}
+            className="text-xs font-bold px-3 py-1.5 rounded-lg transition self-start sm:self-auto"
+            style={{ color: "#0D1F4E", background: "#EEF2FF" }}>
+            View All Issued →
+          </button>
+        </div>
+
+        {/* Search within transactions */}
+        <div className="mt-3 relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+          <input
+            type="text"
+            value={txnSearch}
+            onChange={(e) => setTxnSearch(e.target.value)}
+            placeholder="Search in transactions..."
+            className="w-full border border-gray-200 rounded-lg pl-8 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B6B35]/30 focus:border-[#1B6B35]"
+          />
+          {txnSearch && (
+            <button onClick={() => setTxnSearch("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm">
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Table / Empty */}
+      {shown.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-4xl mb-3">📋</p>
+          <p className="text-gray-500 font-medium text-sm">No records found</p>
+          <p className="text-gray-400 text-xs mt-1">
+            {txnSearch || typeFilter !== "all" || statusFilter !== "all"
+              ? "Try clearing some filters."
+              : "No transactions yet."}
+          </p>
+          {(txnSearch || typeFilter !== "all" || statusFilter !== "all") && (
+            <button
+              onClick={() => { setTxnSearch(""); setTypeFilter("all"); setStatusFilter("all"); }}
+              className="mt-3 text-xs text-blue-600 hover:underline font-medium">
+              Clear all filters
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Desktop table */}
+          <div className="hidden sm:block overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead style={{ background: "#f8f9fa" }}>
+                <tr className="text-left border-b border-gray-100">
+                  {["Book", "Borrower"].map((h) => (
+                    <th key={h} className="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">{h}</th>
+                  ))}
+                  <th className="px-5 py-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold uppercase tracking-wide text-gray-500">Type</span>
+                      <div className="relative">
+                        <select
+                          value={typeFilter}
+                          onChange={(e) => setTypeFilter(e.target.value)}
+                          className="appearance-none pl-2 pr-5 py-0.5 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-600 focus:outline-none focus:border-[#0D1F4E] cursor-pointer"
+                        >
+                          <option value="all">All</option>
+                          <option value="student">Student</option>
+                          <option value="staff">Staff</option>
+                        </select>
+                        <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400" style={{ fontSize: "9px" }}>▾</span>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-800 truncate">{b.title}</p>
-                      <p className="text-xs text-gray-400 truncate">{b.author} · {b.accessionNo || b.barcode}</p>
+                  </th>
+                  <th className="px-5 py-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold uppercase tracking-wide text-gray-500">Status</span>
+                      <div className="relative">
+                        <select
+                          value={statusFilter}
+                          onChange={(e) => setStatusFilter(e.target.value)}
+                          className="appearance-none pl-2 pr-5 py-0.5 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-600 focus:outline-none focus:border-[#0D1F4E] cursor-pointer"
+                        >
+                          <option value="all">All</option>
+                          <option value="issued">Issued</option>
+                          <option value="returned">Returned</option>
+                        </select>
+                        <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400" style={{ fontSize: "9px" }}>▾</span>
+                      </div>
                     </div>
-                    <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
-                      b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                    }`}>
-                      {b.available ? "✓ Available" : "✗ Issued"}
-                    </span>
-                    <span className="text-gray-300 group-hover:text-gray-500 text-sm flex-shrink-0">›</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ── Students ── */}
-          {studentResults.length > 0 && (
-            <div>
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
-                🎓 Students
-              </p>
-              <div className="space-y-1">
-                {studentResults.map((s) => {
-                  const dues = duesFor(s.id);
-                  return (
-                    <button key={s.id}
-                      onClick={() => handleNavigate("/admin/students", { highlightId: s.id })}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 text-white"
-                        style={{ background: "linear-gradient(135deg, #0D1F4E, #1B4332)" }}>
-                        {s.name?.charAt(0)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800 truncate">{s.name}</p>
-                        <p className="text-xs text-gray-400 font-mono">{s.pin} · {s.branch} · {s.year}</p>
-                      </div>
-                      <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
-                        dues > 0 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
-                      }`}>
-                        {dues > 0 ? `⚠️ ${dues} Due${dues > 1 ? "s" : ""}` : "✓ No Dues"}
-                      </span>
-                      <span className="text-gray-300 group-hover:text-gray-500 text-sm flex-shrink-0">›</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* ── Staff ── */}
-          {staffResults.length > 0 && (
-            <div>
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
-                👩‍🏫 Staff
-              </p>
-              <div className="space-y-1">
-                {staffResults.map((s) => {
-                  const dues = duesFor(s.id);
-                  return (
-                    <button key={s.id}
-                      onClick={() => handleNavigate("/admin/staff", { highlightId: s.id })}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 text-indigo-200"
-                        style={{ background: "linear-gradient(135deg, #312e81, #1e3a5f)" }}>
-                        {s.name?.charAt(0)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800 truncate">{s.name}</p>
-                        <p className="text-xs text-gray-400">{s.designation} · {s.section} · <span className="font-mono">{s.staffId}</span></p>
-                      </div>
-                      <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
-                        dues > 0 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
-                      }`}>
-                        {dues > 0 ? `⚠️ ${dues} Due${dues > 1 ? "s" : ""}` : "✓ No Dues"}
-                      </span>
-                      <span className="text-gray-300 group-hover:text-gray-500 text-sm flex-shrink-0">›</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* ── Transactions ── */}
-          {txnResults.length > 0 && (
-            <div>
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
-                📋 Transactions
-              </p>
-              <div className="space-y-1">
-                {txnResults.map((t) => {
+                  </th>
+                  {["Date", "Days"].map((h) => (
+                    <th key={h} className="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {shown.map((t) => {
                   const days = t.issueDate?.toDate
                     ? Math.floor((Date.now() - t.issueDate.toDate()) / 86400000) : null;
                   const isOverdue = days !== null && days > 14 && t.status === "issued";
                   return (
-                    <button key={t.id}
-                      onClick={() => handleNavigate("/admin/reports")}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0"
-                        style={{
-                          background: t.status === "issued" ? "#FFFBEB" : "#F0FDF4",
-                          border: `1px solid ${t.status === "issued" ? "#fde68a" : "#bbf7d0"}`,
-                        }}>
-                        {t.status === "issued" ? "📤" : "📥"}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800 truncate">{t.bookTitle}</p>
-                        <p className="text-xs text-gray-400 truncate">
-                          {t.studentName || t.borrowerName}
-                          {days !== null ? ` · ${days}d ago` : ""}
-                        </p>
-                      </div>
-                      <span className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
-                        isOverdue ? "bg-red-100 text-red-700"
-                        : t.status === "issued" ? "bg-amber-100 text-amber-700"
-                        : "bg-green-100 text-green-700"
-                      }`}>
-                        {isOverdue ? "⚠️ Overdue" : t.status === "issued" ? "Issued" : "Returned"}
-                      </span>
-                      <span className="text-gray-300 group-hover:text-gray-500 text-sm flex-shrink-0">›</span>
-                    </button>
+                    <tr key={t.id} className="hover:bg-gray-50 transition">
+                      <td className="px-5 py-3 font-medium text-gray-800 max-w-xs truncate">{t.bookTitle}</td>
+                      <td className="px-5 py-3 text-gray-600">{t.studentName || t.borrowerName}</td>
+                      <td className="px-5 py-3">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          (t.borrowerType || "student") === "staff"
+                            ? "bg-indigo-100 text-indigo-700"
+                            : "bg-blue-50 text-blue-700"
+                        }`}>
+                          {(t.borrowerType || "student") === "staff" ? "Staff" : "Student"}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          t.status === "issued"
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-green-100 text-green-700"
+                        }`}>
+                          {t.status}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-xs text-gray-400">
+                        {t.issueDate?.toDate ? t.issueDate.toDate().toLocaleDateString("en-IN") : "—"}
+                      </td>
+                      <td className="px-5 py-3 text-xs">
+                        {days !== null ? (
+                          <span className={isOverdue ? "text-red-600 font-bold" : "text-gray-400"}>
+                            {days}d {isOverdue ? "⚠️" : ""}
+                          </span>
+                        ) : "—"}
+                      </td>
+                    </tr>
                   );
                 })}
-              </div>
-            </div>
-          )}
-        </div>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile */}
+          <div className="sm:hidden divide-y divide-gray-100">
+            {shown.map((t) => {
+              const days = t.issueDate?.toDate
+                ? Math.floor((Date.now() - t.issueDate.toDate()) / 86400000) : null;
+              return (
+                <div key={t.id} className="px-5 py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-gray-800 truncate">{t.bookTitle}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {t.studentName || t.borrowerName}
+                      {days !== null ? ` · ${days}d` : ""}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                      t.status === "issued" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
+                    }`}>
+                      {t.status}
+                    </span>
+                    <span className={`text-xs ${(t.borrowerType || "student") === "staff" ? "text-indigo-500" : "text-blue-500"}`}>
+                      {(t.borrowerType || "student") === "staff" ? "Staff" : "Student"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );
@@ -395,9 +580,12 @@ export default function AdminDashboard() {
         { key: "title",       label: "Title" },
         { key: "author",      label: "Author" },
         { key: "available",   label: "Status",
-          render: (b) => <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{b.available ? "Available" : "Issued"}</span> },
+          render: (b) => (
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+              {b.available ? "Available" : "Issued"}
+            </span>
+          )},
       ],
-      emptyMsg: "No books found.",
     },
     available: {
       title: "Available Books", icon: "✅",
@@ -408,7 +596,6 @@ export default function AdminDashboard() {
         { key: "author",      label: "Author" },
         { key: "subject",     label: "Subject" },
       ],
-      emptyMsg: "No books available.",
     },
     issued: {
       title: "Currently Issued", icon: "📤",
@@ -426,7 +613,6 @@ export default function AdminDashboard() {
             return <span className={d > 14 ? "text-red-600 font-bold" : "text-gray-600"}>{d}d {d > 14 ? "⚠️" : ""}</span>;
           }},
       ],
-      emptyMsg: "No books currently issued.",
     },
     returned: {
       title: "Returned Books", icon: "📥",
@@ -439,7 +625,6 @@ export default function AdminDashboard() {
         { key: "returnDate",  label: "Returned",
           render: (t) => t.returnDate?.toDate ? t.returnDate.toDate().toLocaleDateString("en-IN") : "—" },
       ],
-      emptyMsg: "No returned transactions.",
     },
     students: {
       title: "All Students", icon: "🎓",
@@ -450,7 +635,6 @@ export default function AdminDashboard() {
         { key: "branch", label: "Branch" },
         { key: "year",   label: "Year" },
       ],
-      emptyMsg: "No students registered.",
     },
     staff: {
       title: "All Staff", icon: "👩‍🏫",
@@ -461,24 +645,18 @@ export default function AdminDashboard() {
         { key: "designation", label: "Designation" },
         { key: "section",     label: "Section" },
       ],
-      emptyMsg: "No staff registered.",
     },
   };
 
   const activeModal = modal ? MODALS[modal] : null;
-  const recent = [...transactions]
-    .sort((a, b) => (b.issueDate?.seconds || 0) - (a.issueDate?.seconds || 0))
-    .slice(0, 8);
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayTxns = transactions.filter(
     (t) => t.issueDate?.toDate && t.issueDate.toDate() >= today
   ).length;
 
-  const handleSearchNavigate = (path, state) => navigate(path, { state });
-
   return (
     <AdminLayout>
-      {/* Page header */}
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div className="flex items-center gap-3">
           <img src="/logo.png" alt="" className="w-10 h-10 rounded-full object-cover border-2 hidden sm:block"
@@ -521,90 +699,18 @@ export default function AdminDashboard() {
         staff={staff}
         books={books}
         transactions={transactions}
-        onNavigate={handleSearchNavigate}
+        onNavigate={(path, state) => navigate(path, { state })}
       />
 
-      {/* Recent Transactions */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100"
-          style={{ background: "linear-gradient(135deg, #0D1F4E08, #1B433208)" }}>
-          <div>
-            <h2 className="text-sm font-bold text-gray-800">Recent Transactions</h2>
-            <p className="text-xs text-gray-400 mt-0.5">{todayTxns} transaction{todayTxns !== 1 ? "s" : ""} today</p>
-          </div>
-          <button onClick={() => setModal("issued")}
-            className="text-xs font-bold px-3 py-1.5 rounded-lg transition"
-            style={{ color: "#0D1F4E", background: "#EEF2FF" }}>
-            View Issued →
-          </button>
-        </div>
+      {/* Transactions with filters */}
+      <TransactionTable
+        transactions={transactions}
+        onViewIssued={() => setModal("issued")}
+      />
 
-        {recent.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-4xl mb-3">📋</p>
-            <p className="text-gray-400 text-sm">No transactions yet.</p>
-          </div>
-        ) : (
-          <>
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead style={{ background: "#f8f9fa" }}>
-                  <tr className="text-left border-b border-gray-100">
-                    {["Book", "Borrower", "Type", "Status", "Date"].map((h) => (
-                      <th key={h} className="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {recent.map((t) => (
-                    <tr key={t.id} className="hover:bg-gray-50 transition">
-                      <td className="px-5 py-3 font-medium text-gray-800 max-w-xs truncate">{t.bookTitle}</td>
-                      <td className="px-5 py-3 text-gray-600">{t.studentName || t.borrowerName}</td>
-                      <td className="px-5 py-3">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                          t.borrowerType === "staff" ? "bg-indigo-100 text-indigo-700" : "bg-blue-50 text-blue-700"
-                        }`}>
-                          {t.borrowerType === "staff" ? "Staff" : "Student"}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                          t.status === "issued" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
-                        }`}>
-                          {t.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-xs text-gray-400">
-                        {t.issueDate?.toDate ? t.issueDate.toDate().toLocaleDateString("en-IN") : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="sm:hidden divide-y divide-gray-100">
-              {recent.map((t) => (
-                <div key={t.id} className="px-5 py-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-gray-800 truncate">{t.bookTitle}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {t.studentName || t.borrowerName} ·{" "}
-                      {t.issueDate?.toDate ? t.issueDate.toDate().toLocaleDateString("en-IN") : ""}
-                    </p>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${
-                    t.status === "issued" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
-                  }`}>
-                    {t.status}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-
-      {activeModal && <QuickViewModal {...activeModal} onClose={() => setModal(null)} />}
+      {activeModal && (
+        <QuickViewModal {...activeModal} onClose={() => setModal(null)} emptyMsg="No records found." />
+      )}
     </AdminLayout>
   );
 }
