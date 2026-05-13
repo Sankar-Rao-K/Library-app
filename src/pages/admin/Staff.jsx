@@ -6,7 +6,7 @@ import StaffDetailModal from "../../components/StaffDetailModal";
 import QRDisplayModal from "../../components/QRDisplayModal";
 import { smartSearch } from "../../utils/searchUtils";
 import {
-  listenToStaff, addStaff, addStaffBatch, getExistingStaffIds,
+  listenToStaff, addStaff, addStaffBatch, getExistingStaffIds, updateStaff,
 } from "../../firebase/firestore";
 
 const EMPTY = { name: "", staffId: "", designation: "", section: "ECE", email: "" };
@@ -89,6 +89,9 @@ export default function Staff() {
   const [showForm, setShowForm]           = useState(false);
   const [loading, setLoading]             = useState(false);
   const [selectedStaff, setSelectedStaff] = useState(null);
+  const [editingStaff, setEditingStaff]   = useState(null);
+  const [editForm, setEditForm]           = useState(EMPTY);
+  const [editLoading, setEditLoading]     = useState(false);
   const [newStaffQR, setNewStaffQR] = useState(null);
   const [search, setSearch]               = useState("");
 
@@ -123,6 +126,26 @@ export default function Staff() {
       setSelectedStaff(found);
     }
   }, [staffList]);
+
+  const openEdit = (s, e) => {
+    e?.stopPropagation();
+    setEditingStaff(s);
+    setEditForm({ name: s.name || "", staffId: s.staffId || "", designation: s.designation || "", section: s.section || "ECE", email: s.email || "" });
+    setShowForm(false);
+    setShowImport(false);
+  };
+
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    setEditLoading(true);
+    try {
+      await updateStaff(editingStaff.id, { ...editForm, borrowerType: "staff" });
+      setEditingStaff(null);
+    } catch (err) {
+      alert("Error: " + err.message);
+    }
+    setEditLoading(false);
+  };
 
   const handleAdd = async (e) => {
   e.preventDefault();
@@ -234,6 +257,61 @@ export default function Staff() {
           </button>
         </div>
       </div>
+
+      {/* Edit Form */}
+      {editingStaff && (
+        <div className="bg-white rounded-xl shadow-sm border border-blue-100 p-5 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-gray-800">Edit Staff — <span className="text-blue-600">{editingStaff.name}</span></h2>
+            <button onClick={() => setEditingStaff(null)}
+              className="text-gray-400 hover:text-gray-600 text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100">✕</button>
+          </div>
+          <form onSubmit={handleUpdate} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+              <input type="text" required value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Staff ID (CMS ID)</label>
+              <input type="text" required value={editForm.staffId}
+                onChange={(e) => setEditForm({ ...editForm, staffId: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Designation</label>
+              <input type="text" required value={editForm.designation}
+                onChange={(e) => setEditForm({ ...editForm, designation: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
+              <select value={editForm.section} onChange={(e) => setEditForm({ ...editForm, section: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {SECTIONS.map((s) => <option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email (optional)</label>
+              <input type="email" value={editForm.email}
+                onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                placeholder="e.g. staff@college.edu"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div className="sm:col-span-2 flex gap-3">
+              <button type="submit" disabled={editLoading}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2 rounded-lg text-sm font-medium transition">
+                {editLoading ? "Saving..." : "Save Changes"}
+              </button>
+              <button type="button" onClick={() => setEditingStaff(null)}
+                className="border border-gray-300 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Add Form */}
       {showForm && (
@@ -458,7 +536,7 @@ export default function Staff() {
                         <th className="px-5 py-3">Staff ID</th>
                         <th className="px-5 py-3">Designation</th>
                         <th className="px-5 py-3">Section</th>
-                        <th className="px-5 py-3">Details</th>
+                        <th className="px-5 py-3">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
@@ -470,7 +548,14 @@ export default function Staff() {
                           <td className="px-5 py-3 text-gray-500">{s.designation}</td>
                           <td className="px-5 py-3"><SectionBadge section={s.section} /></td>
                           <td className="px-5 py-3">
-                            <button className="text-blue-600 text-xs hover:underline font-medium">View →</button>
+                            <div className="flex items-center gap-3">
+                              <button className="text-blue-600 text-xs hover:underline font-medium">View →</button>
+                              <button
+                                onClick={(e) => openEdit(s, e)}
+                                className="text-xs font-medium px-2 py-0.5 rounded border border-gray-200 text-gray-600 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition">
+                                ✏️ Edit
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -493,7 +578,14 @@ export default function Staff() {
                           <p className="text-xs text-gray-500 mt-0.5">{s.designation}</p>
                         </div>
                       </div>
-                      <span className="text-gray-400 text-lg flex-shrink-0">›</span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button
+                          onClick={(e) => openEdit(s, e)}
+                          className="text-xs font-medium px-2 py-1 rounded border border-gray-200 text-gray-600 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition">
+                          ✏️
+                        </button>
+                        <span className="text-gray-400 text-lg">›</span>
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -135,6 +135,9 @@ export const getStaffByIdAndSection = async (staffId, section) => {
 
 export const deleteStaff = (id) => deleteDoc(doc(db, "staff", id));
 
+export const updateStaff = (id, data) =>
+  updateDoc(doc(db, "staff", id), data);
+
 export const listenToStaff = (cb) =>
   onSnapshot(collection(db, "staff"), (snap) =>
     cb(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
