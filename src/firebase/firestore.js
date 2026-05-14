@@ -29,6 +29,7 @@ export const getBookByBarcode = async (barcode) => {
 export const updateBook = (id, data) =>
   updateDoc(doc(db, "books", id), data);
 
+export const deleteBook = (id) => deleteDoc(doc(db, "books", id));
 // ── STUDENTS ────────────────────────────────────────────────────────────
 
 export const addStudent = (data) =>
