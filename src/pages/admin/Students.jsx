@@ -2,24 +2,21 @@ import { useEffect, useState, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import * as XLSX from "xlsx";
 import AdminLayout from "../../components/AdminLayout";
+import SearchBar from "../../components/SearchBar";
 import StudentDetailModal from "../../components/StudentDetailModal";
-import QRDisplayModal from "../../components/QRDisplayModal";
-import { smartSearch } from "../../utils/searchUtils";
 import {
-  listenToStudents,
-  addStudent,
-  addStudentsBatch,
-  getExistingPins,
-  autoDeletePassedOutStudents,
+  listenToStudents, addStudent, addStudentsBatch,
+  getExistingPins, autoDeletePassedOutStudents,
 } from "../../firebase/firestore";
 import { getStudentInfo, getBranchFromPin, groupStudentsBySem } from "../../utils/studentUtils";
+import { smartSearch } from "../../utils/searchUtils";
 
 const EMPTY = { name: "", email: "", pin: "", branch: "CME" };
 
 function parseStudentsFromWorkbook(workbook) {
   const results = [];
   workbook.SheetNames.forEach((sheetName) => {
-    const ws = workbook.Sheets[sheetName];
+    const ws   = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
     let headerIdx = -1;
     let cols = { pin: 1, name: 2 };
@@ -28,9 +25,7 @@ function parseStudentsFromWorkbook(workbook) {
       const pinCol  = row.findIndex((c) => c.includes("pin"));
       const nameCol = row.findIndex((c) => c.includes("name"));
       if (pinCol !== -1 && nameCol !== -1) {
-        headerIdx = i;
-        cols = { pin: pinCol, name: nameCol };
-        break;
+        headerIdx = i; cols = { pin: pinCol, name: nameCol }; break;
       }
     }
     const dataStart = headerIdx !== -1 ? headerIdx + 1 : 0;
@@ -45,10 +40,7 @@ function parseStudentsFromWorkbook(workbook) {
       const nameStr = String(name).trim();
       const branch  = getBranchFromPin(pinStr);
       const { yearLabel, sem, semNum, isOld } = getStudentInfo(pinStr);
-      results.push({
-        pin: pinStr, name: nameStr, branch,
-        year: yearLabel, currentSem: sem, semNum, isOld, email: "",
-      });
+      results.push({ pin: pinStr, name: nameStr, branch, year: yearLabel, currentSem: sem, semNum, isOld, email: "" });
     }
   });
   return results;
@@ -57,26 +49,13 @@ function parseStudentsFromWorkbook(workbook) {
 function SemBadge({ pin }) {
   const { yearLabel, sem, isOld } = getStudentInfo(pin);
   if (isOld)
-    return (
-      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
-        Passed Out
-      </span>
-    );
-  return (
-    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
-      {yearLabel} · {sem}
-    </span>
-  );
+    return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Passed Out</span>;
+  return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{yearLabel} · {sem}</span>;
 }
 
 const SEM_GROUP_ORDER = [
-  "I Year — Sem 1",
-  "II Year — Sem 3",
-  "II Year — Sem 4",
-  "III Year — Sem 5",
-  "III Year — Sem 6",
-  "Passed Out",
-  "Unknown",
+  "I Year — Sem 1", "II Year — Sem 3", "II Year — Sem 4",
+  "III Year — Sem 5", "III Year — Sem 6", "Passed Out", "Unknown",
 ];
 
 export default function Students() {
@@ -87,7 +66,6 @@ export default function Students() {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [search, setSearch]                   = useState("");
   const [autoDeleteMsg, setAutoDeleteMsg]     = useState("");
-  const [newStudentQR, setNewStudentQR] = useState(null);
 
   const [showImport, setShowImport]       = useState(false);
   const [preview, setPreview]             = useState(null);
@@ -99,17 +77,14 @@ export default function Students() {
   const [editIdx, setEditIdx]             = useState(null);
   const fileRef = useRef();
 
-  // ── Navigation highlight from universal search ──────────────────────
   const location = useLocation();
   const pendingHighlightRef = useRef(location.state?.highlightId || null);
 
-  // Load students
   useEffect(() => {
     const unsub = listenToStudents(setStudents);
     return () => unsub();
   }, []);
 
-  // Auto-open modal — waits until Firestore data arrives
   useEffect(() => {
     if (!pendingHighlightRef.current || students.length === 0) return;
     const found = students.find((s) => s.id === pendingHighlightRef.current);
@@ -120,33 +95,47 @@ export default function Students() {
     }
   }, [students]);
 
-  // Auto-delete passed-out students (proper ES module import)
   useEffect(() => {
     autoDeletePassedOutStudents()
       .then((deleted) => {
         if (deleted?.length > 0) {
-          setAutoDeleteMsg(
-            `🗑️ ${deleted.length} passed-out student(s) auto-removed: ${deleted.join(", ")}`
-          );
+          setAutoDeleteMsg(`🗑️ ${deleted.length} passed-out student(s) auto-removed: ${deleted.join(", ")}`);
           setTimeout(() => setAutoDeleteMsg(""), 8000);
         }
       })
       .catch(() => {});
   }, []);
 
+  // ── Demo CSV download ─────────────────────────────────────────────────
+  const downloadDemoCSV = () => {
+    const csv = [
+      "Sl.No,Pin Number,Name of the Student",
+      "1,23173-CM-001,K. Sankar Rao",
+      "2,23173-CM-002,A. Revanth N. Kalyan",
+      "3,23173-EC-001,M. Ravi Kumar",
+      "4,22173-CM-010,B. Sai Prasad",
+      "5,24173-CM-005,G. Lakshmi",
+      "6,23202-CM-027,V. Hemanth Kumar",
+      "7,23173-EC-015,K. Durga Prasad",
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = "demo_students_import_template.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleAdd = async (e) => {
-  e.preventDefault();
-  setLoading(true);
-  try {
-    const branch = getBranchFromPin(form.pin) || form.branch;
-    const { yearLabel, sem, semNum, isOld } = getStudentInfo(form.pin);
-    await addStudent({ ...form, branch, year: yearLabel, currentSem: sem, semNum, isOld });
-    setNewStudentQR({ ...form, branch }); // show QR
-    setForm(EMPTY);
-    setShowForm(false);
-  } catch (err) { alert("Error: " + err.message); }
-  setLoading(false);
-};
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const branch = getBranchFromPin(form.pin) || form.branch;
+      const { yearLabel, sem, semNum, isOld } = getStudentInfo(form.pin);
+      await addStudent({ ...form, branch, year: yearLabel, currentSem: sem, semNum, isOld });
+      setForm(EMPTY); setShowForm(false);
+    } catch (err) { alert("Error: " + err.message); }
+    setLoading(false);
+  };
 
   const resetImport = () => {
     setPreview(null); setImportFile(""); setImportError("");
@@ -192,11 +181,8 @@ export default function Students() {
     setImportSaving(false);
   };
 
-const filtered = smartSearch(
-  students,
-  search,
-  ["name", "pin", "branch", "year", "currentSem"]
-).sort((a, b) => (a.pin || "").localeCompare(b.pin || ""));
+  const filtered = smartSearch(students, search, ["name", "pin", "branch", "year", "currentSem"])
+    .sort((a, b) => (a.pin || "").localeCompare(b.pin || ""));
 
   const grouped = groupStudentsBySem(filtered);
 
@@ -225,6 +211,7 @@ const filtered = smartSearch(
         </div>
       )}
 
+      {/* Add Form */}
       {showForm && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
           <h2 className="text-base font-semibold text-gray-800 mb-1">Add New Student</h2>
@@ -259,6 +246,7 @@ const filtered = smartSearch(
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option>CME</option><option>ECE</option>
               </select>
+              <p className="text-xs mt-1 text-gray-400">Auto-detected from PIN</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Email (optional)</label>
@@ -270,27 +258,58 @@ const filtered = smartSearch(
             <div className="sm:col-span-2">
               <button type="submit" disabled={loading}
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2 rounded-lg text-sm font-medium transition">
-                {loading ? "Saving..." : "Save Student & Generate QR"}
+                {loading ? "Saving…" : "Save Student"}
               </button>
             </div>
           </form>
         </div>
       )}
 
+      {/* Import Section */}
       {showImport && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
           <h2 className="text-base font-semibold text-gray-800 mb-1">Import Students from File</h2>
-          <p className="text-xs text-gray-400 mb-3">Supports .xlsx · .csv · .json</p>
+          <p className="text-xs text-gray-400 mb-4">Supports .xlsx · .csv · .json</p>
+
+          {/* Demo download banner */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 flex items-start gap-3">
+            <span className="text-xl flex-shrink-0">📄</span>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-amber-800">New to importing?</p>
+              <p className="text-xs text-amber-600 mt-0.5 mb-3 leading-relaxed">
+                Download the demo template, fill in your student data, and upload it here.
+                <br />
+                <span className="font-semibold">PIN format:</span> 23173-CM-001 &nbsp;
+                (YY = join year, CM/EC = branch, 001 = roll number)
+                <br />
+                <span className="font-semibold">Branch</span> is auto-detected from PIN (CM → CME, EC → ECE).
+                <br />
+                <span className="font-semibold">Year & Semester</span> are calculated automatically.
+              </p>
+              <button onClick={downloadDemoCSV}
+                className="text-xs font-bold px-4 py-2 rounded-lg text-white transition inline-flex items-center gap-1.5"
+                style={{ background: "linear-gradient(135deg, #b45309, #d97706)" }}>
+                ⬇️ Download Students Template (.csv)
+              </button>
+            </div>
+          </div>
+
           <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mb-4 font-mono">
-            Expected: Sl.No | Pin Number | Name of the Student
+            Expected columns: Sl.No | Pin Number | Name of the Student
           </p>
-          {importError && <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-3 mb-3">{importError}</div>}
+
+          {importError && (
+            <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-3 mb-3">
+              {importError}
+            </div>
+          )}
           {importDone && (
             <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3 mb-3">
               {importSummary}
               <button onClick={resetImport} className="ml-3 underline text-xs">Import more</button>
             </div>
           )}
+
           {!preview && !importDone && (
             <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 hover:border-blue-400 rounded-xl py-8 cursor-pointer transition">
               <span className="text-3xl mb-2">📂</span>
@@ -300,15 +319,19 @@ const filtered = smartSearch(
             </label>
           )}
           {importFile && !importDone && <p className="text-xs text-gray-400 mt-2">📄 {importFile}</p>}
+
           {preview && (
             <div className="mt-4">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <p className="text-sm font-semibold text-gray-700">{preview.length} students ready to import</p>
                 <div className="flex gap-2">
-                  <button onClick={resetImport} className="border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg text-xs">Cancel</button>
+                  <button onClick={resetImport}
+                    className="border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg text-xs hover:bg-gray-50">
+                    Cancel
+                  </button>
                   <button onClick={handleConfirmImport} disabled={importSaving}
                     className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-1.5 rounded-lg text-xs font-semibold">
-                    {importSaving ? "Importing..." : `✓ Import ${preview.length} Students`}
+                    {importSaving ? "Importing…" : `✓ Import ${preview.length} Students`}
                   </button>
                 </div>
               </div>
@@ -316,9 +339,12 @@ const filtered = smartSearch(
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr className="text-left text-gray-500">
-                      <th className="px-3 py-2">#</th><th className="px-3 py-2">PIN</th>
-                      <th className="px-3 py-2">Name</th><th className="px-3 py-2">Branch</th>
-                      <th className="px-3 py-2">Year · Sem</th><th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2">#</th>
+                      <th className="px-3 py-2">PIN</th>
+                      <th className="px-3 py-2">Name</th>
+                      <th className="px-3 py-2">Branch</th>
+                      <th className="px-3 py-2">Year · Sem</th>
+                      <th className="px-3 py-2">Status</th>
                       <th className="px-3 py-2">Act</th>
                     </tr>
                   </thead>
@@ -330,12 +356,16 @@ const filtered = smartSearch(
                           <>
                             <td className="px-3 py-2">
                               <input value={row.pin}
-                                onChange={(e) => setPreview((p) => p.map((r, i) => i === idx ? { ...r, pin: e.target.value, ...getStudentInfo(e.target.value), branch: getBranchFromPin(e.target.value) } : r))}
+                                onChange={(e) => setPreview((p) => p.map((r, i) =>
+                                  i === idx ? { ...r, pin: e.target.value, ...getStudentInfo(e.target.value), branch: getBranchFromPin(e.target.value) } : r
+                                ))}
                                 className="w-full border border-blue-300 rounded px-1 py-0.5 font-mono" />
                             </td>
                             <td className="px-3 py-2">
                               <input value={row.name}
-                                onChange={(e) => setPreview((p) => p.map((r, i) => i === idx ? { ...r, name: e.target.value } : r))}
+                                onChange={(e) => setPreview((p) => p.map((r, i) =>
+                                  i === idx ? { ...r, name: e.target.value } : r
+                                ))}
                                 className="w-full border border-blue-300 rounded px-1 py-0.5" />
                             </td>
                             <td className="px-3 py-2 text-gray-600">{row.branch}</td>
@@ -372,14 +402,31 @@ const filtered = smartSearch(
         </div>
       )}
 
-      <div className="mb-5">
-        <input type="text" placeholder="Search by name, PIN, branch... (smart search)"
-          value={search} onChange={(e) => setSearch(e.target.value)}
-          className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-      </div>
+      {/* Search */}
+      <SearchBar
+        value={search}
+        onChange={setSearch}
+        placeholder="Search by name, PIN, or branch..."
+        resultCount={filtered.length}
+        totalCount={students.length}
+        className="mb-5"
+      />
 
+      {/* Students grouped by semester */}
       {filtered.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-100 py-16 text-center text-gray-400">No students found.</div>
+        <div className="bg-white rounded-xl border border-gray-100 py-16 text-center text-gray-400">
+          <p className="text-4xl mb-3">🔍</p>
+          <p className="font-medium text-gray-500 text-sm">No students found</p>
+          <p className="text-xs mt-1">
+            {search ? `No match for "${search}".` : "No students have been added yet."}
+          </p>
+          {search && (
+            <button onClick={() => setSearch("")}
+              className="mt-3 text-xs text-blue-600 hover:underline font-medium">
+              Clear search
+            </button>
+          )}
+        </div>
       ) : (
         <div className="space-y-8">
           {SEM_GROUP_ORDER.map((groupName) => {
@@ -401,8 +448,10 @@ const filtered = smartSearch(
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b border-gray-100">
                       <tr className="text-left text-gray-500 text-xs uppercase">
-                        <th className="px-5 py-3">Name</th><th className="px-5 py-3">PIN</th>
-                        <th className="px-5 py-3">Branch</th><th className="px-5 py-3">Year / Sem</th>
+                        <th className="px-5 py-3">Name</th>
+                        <th className="px-5 py-3">PIN</th>
+                        <th className="px-5 py-3">Branch</th>
+                        <th className="px-5 py-3">Year / Sem</th>
                         <th className="px-5 py-3">Details</th>
                       </tr>
                     </thead>

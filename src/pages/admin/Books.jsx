@@ -2,8 +2,16 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import * as XLSX from "xlsx";
 import AdminLayout from "../../components/AdminLayout";
 import QRDisplayModal from "../../components/QRDisplayModal";
-import { listenToBooks, addBook, addBooksBatch, updateBook, deleteBook } from "../../firebase/firestore";
+import {
+  listenToBooks,
+  addBook,
+  addBooksBatch,
+  updateBook,
+  deleteBook,
+  listenToTransactions
+} from "../../firebase/firestore";
 import { smartSearch } from "../../utils/searchUtils";
+
 
 const EMPTY = { title: "", author: "", barcode: "", subject: "", totalCopies: 1 };
 
@@ -237,6 +245,7 @@ function DeleteConfirm({ book, onConfirm, onCancel }) {
 // ═════════════════════════════════════════════════════════════════════
 export default function Books() {
   const [books, setBooks]         = useState([]);
+  const [transactions, setTransactions] = useState([]);
   const [form, setForm]           = useState(EMPTY);
   const [showForm, setShowForm]   = useState(false);
   const [loading, setLoading]     = useState(false);
@@ -266,6 +275,24 @@ export default function Books() {
     return () => unsub();
   }, []);
 
+  useEffect(() => {
+  const unsub = listenToTransactions(setTransactions);
+  return () => unsub();
+}, []);
+
+// Helper — find who has this book
+const issuedTo = (book) => {
+  const txn = transactions.find(
+    (t) =>
+      (t.bookId === book.id ||
+        t.barcode === (book.barcode || book.accessionNo)) &&
+      t.status === "issued"
+  );
+
+  return txn
+    ? (txn.studentName || txn.borrowerName || txn.studentPin)
+    : null;
+};
   // Derived: duplicate accession codes already in Firestore
   const dbDuplicates = useMemo(() => {
     const byAcc = {};
@@ -344,6 +371,43 @@ export default function Books() {
     setPreview(null); setImportFile(""); setImportError(""); setImportDone(false); setDupRows(new Set());
     if (fileRef.current) fileRef.current.value = "";
   };
+
+  const downloadDemoCSV = (type) => {
+  let csv = "";
+
+  if (type === "books") {
+    csv = [
+      "Accession No.,Title,Author / Editor,Subject / Branch",
+      "1001,Engineering Mathematics,B.S. Grewal,CME",
+      "1002,Basic Electrical Engineering,D.C. Kulshreshtha,ECE",
+      "1003,Workshop Technology,Hajra Choudhary,CME",
+      "BB-001,Programming in C,Dennis Ritchie,Computer Science",
+      "BB-002,Data Structures,Seymour Lipschutz,Computer Science",
+    ].join("\n");
+  } else {
+    csv = [
+      "Sl.No,Pin Number,Name of the Student",
+      "1,23173-CM-001,K. Sankar Rao",
+      "2,23173-CM-002,A. Revanth N. Kalyan",
+      "3,23173-EC-001,M. Ravi Kumar",
+      "4,22173-CM-010,B. Sai Prasad",
+      "5,24173-CM-005,G. Lakshmi",
+    ].join("\n");
+  }
+
+  const blob = new Blob([csv], {
+    type: "text/csv;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `demo_${type}_import_template.csv`;
+  a.click();
+
+  URL.revokeObjectURL(url);
+};
 
   const handleFile = (e) => {
     const file = e.target.files[0];
@@ -565,6 +629,30 @@ export default function Books() {
               <button onClick={resetImport} className="ml-3 underline text-xs">Import more</button>
             </div>
           )}
+          {/* Demo template download */}
+<div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 flex items-start gap-3">
+  <span className="text-xl flex-shrink-0">📄</span>
+
+  <div className="flex-1">
+    <p className="text-sm font-bold text-amber-800">
+      New to importing?
+    </p>
+
+    <p className="text-xs text-amber-600 mt-0.5 mb-2">
+      Download the demo template, fill in your data, and upload it here.
+    </p>
+
+    <button
+      onClick={() => downloadDemoCSV("books")}
+      className="text-xs font-bold px-4 py-2 rounded-lg text-white transition"
+      style={{
+        background: "linear-gradient(135deg, #b45309, #d97706)"
+      }}
+    >
+      ⬇️ Download Books Template (.csv)
+    </button>
+  </div>
+</div>
           {!preview && !importDone && (
             <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 hover:border-blue-400 rounded-xl py-8 cursor-pointer transition">
               <span className="text-3xl mb-2">📂</span>
@@ -762,10 +850,31 @@ export default function Books() {
                         <td className="px-5 py-3 font-mono text-xs text-gray-400">{b.accessionNo || b.barcode}</td>
                         <td className="px-5 py-3 text-gray-500">{b.subject || b.genre}</td>
                         <td className="px-5 py-3">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                            {b.available ? "Available" : "Issued"}
-                          </span>
-                        </td>
+  {b.available ? (
+    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+      ✓ Available
+    </span>
+  ) : (
+    <div className="flex flex-col gap-0.5">
+      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 w-fit">
+        Issued
+      </span>
+
+      {(() => {
+        const who = issuedTo(b);
+
+        return who ? (
+          <span
+            className="text-xs text-gray-400 font-medium truncate max-w-[120px]"
+            title={who}
+          >
+            → {who}
+          </span>
+        ) : null;
+      })()}
+    </div>
+  )}
+</td>
                         <td className="px-3 py-3"><ActionButtons book={b} /></td>
                       </tr>
                     )}
@@ -846,10 +955,31 @@ export default function Books() {
                               <td className="px-5 py-3 font-mono text-xs text-gray-400">{b.accessionNo || b.barcode}</td>
                               <td className="px-5 py-3 text-gray-500">{b.subject || b.genre}</td>
                               <td className="px-5 py-3">
-                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                                  {b.available ? "Available" : "Issued"}
-                                </span>
-                              </td>
+  {b.available ? (
+    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+      ✓ Available
+    </span>
+  ) : (
+    <div className="flex flex-col gap-0.5">
+      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 w-fit">
+        Issued
+      </span>
+
+      {(() => {
+        const who = issuedTo(b);
+
+        return who ? (
+          <span
+            className="text-xs text-gray-400 font-medium truncate max-w-[120px]"
+            title={who}
+          >
+            → {who}
+          </span>
+        ) : null;
+      })()}
+    </div>
+  )}
+</td>
                               <td className="px-3 py-3"><ActionButtons book={b} /></td>
                             </tr>
                           )}
@@ -932,10 +1062,31 @@ export default function Books() {
                                 <td className="px-5 py-3 font-mono text-xs text-gray-400">{b.accessionNo || b.barcode}</td>
                                 <td className="px-5 py-3 text-gray-500">{b.subject}</td>
                                 <td className="px-5 py-3">
-                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${b.available ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                                    {b.available ? "Available" : "Issued"}
-                                  </span>
-                                </td>
+  {b.available ? (
+    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+      ✓ Available
+    </span>
+  ) : (
+    <div className="flex flex-col gap-0.5">
+      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 w-fit">
+        Issued
+      </span>
+
+      {(() => {
+        const who = issuedTo(b);
+
+        return who ? (
+          <span
+            className="text-xs text-gray-400 font-medium truncate max-w-[120px]"
+            title={who}
+          >
+            → {who}
+          </span>
+        ) : null;
+      })()}
+    </div>
+  )}
+</td>
                                 <td className="px-3 py-3"><ActionButtons book={b} /></td>
                               </tr>
                             )}

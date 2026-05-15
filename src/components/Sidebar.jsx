@@ -8,6 +8,7 @@ const links = [
   { to: "/admin/staff",    label: "Staff",        icon: "👩‍🏫" },
   { to: "/admin/issue",    label: "Issue Book",   icon: "➕" },
   { to: "/admin/return",   label: "Return Book",  icon: "↩️" },
+  { to: "/admin/nodues",   label: "No Dues",      icon: "🏅" },
   { to: "/admin/qrcodes",  label: "QR Codes",     icon: "🔲" },
   { to: "/admin/reports",  label: "Reports",      icon: "📈" },
   { to: "/admin/settings", label: "Settings",     icon: "⚙️" },
@@ -15,13 +16,13 @@ const links = [
 
 const NAV_GROUPS = [
   { label: "Library",    items: ["/admin", "/admin/books", "/admin/students", "/admin/staff"] },
-  { label: "Operations", items: ["/admin/issue", "/admin/return", "/admin/qrcodes"] },
+  { label: "Operations", items: ["/admin/issue", "/admin/return", "/admin/nodues", "/admin/qrcodes"] },
   { label: "Admin",      items: ["/admin/reports", "/admin/settings"] },
 ];
 
 export default function Sidebar({ onClose }) {
   const { logout } = useAuth();
-  const navigate = useNavigate();
+  const navigate   = useNavigate();
 
   const handleLogout = async () => {
     await logout();
@@ -32,7 +33,7 @@ export default function Sidebar({ onClose }) {
     <aside className="w-64 h-full flex flex-col"
       style={{ background: "linear-gradient(180deg, #0B1D3A 0%, #0D2137 60%, #0B2B1E 100%)" }}>
 
-      {/* Header */}
+      {/* Logo */}
       <div className="flex-shrink-0 px-4 py-5 border-b"
         style={{ borderColor: "rgba(201,162,39,0.2)" }}>
         <div className="flex items-center gap-3">
@@ -68,10 +69,7 @@ export default function Sidebar({ onClose }) {
                     className={({ isActive }) => `
                       flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
                       transition-all duration-150
-                      ${isActive
-                        ? "text-[#0D2137] font-bold shadow-md"
-                        : "text-white/60 hover:text-white hover:bg-white/8"
-                      }
+                      ${isActive ? "text-[#0D2137] font-bold shadow-md" : "text-white/60 hover:text-white hover:bg-white/8"}
                     `}
                     style={({ isActive }) => isActive
                       ? { background: "linear-gradient(135deg, #C9A227, #E8C547)", color: "#0D2137" }

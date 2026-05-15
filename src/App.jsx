@@ -7,6 +7,7 @@ import Students         from "./pages/admin/Students";
 import Staff            from "./pages/admin/Staff";
 import IssueBook        from "./pages/admin/IssueBook";
 import ReturnBook       from "./pages/admin/ReturnBook";
+import NoDues           from "./pages/admin/NoDues";
 import QRCodes          from "./pages/admin/QRCodes";
 import Reports          from "./pages/admin/Reports";
 import Settings         from "./pages/admin/Settings";
@@ -48,15 +49,16 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<AuthRoute><Login /></AuthRoute>} />
 
-        <Route path="/admin"          element={<ProtectedRoute allowedRole="admin"><AdminDashboard /></ProtectedRoute>} />
-        <Route path="/admin/books"    element={<ProtectedRoute allowedRole="admin"><Books /></ProtectedRoute>} />
-        <Route path="/admin/students" element={<ProtectedRoute allowedRole="admin"><Students /></ProtectedRoute>} />
-        <Route path="/admin/staff"    element={<ProtectedRoute allowedRole="admin"><Staff /></ProtectedRoute>} />
-        <Route path="/admin/issue"    element={<ProtectedRoute allowedRole="admin"><IssueBook /></ProtectedRoute>} />
-        <Route path="/admin/return"   element={<ProtectedRoute allowedRole="admin"><ReturnBook /></ProtectedRoute>} />
-        <Route path="/admin/qrcodes"  element={<ProtectedRoute allowedRole="admin"><QRCodes /></ProtectedRoute>} />
-        <Route path="/admin/reports"  element={<ProtectedRoute allowedRole="admin"><Reports /></ProtectedRoute>} />
-        <Route path="/admin/settings" element={<ProtectedRoute allowedRole="admin"><Settings /></ProtectedRoute>} />
+        <Route path="/admin"           element={<ProtectedRoute allowedRole="admin"><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/admin/books"     element={<ProtectedRoute allowedRole="admin"><Books /></ProtectedRoute>} />
+        <Route path="/admin/students"  element={<ProtectedRoute allowedRole="admin"><Students /></ProtectedRoute>} />
+        <Route path="/admin/staff"     element={<ProtectedRoute allowedRole="admin"><Staff /></ProtectedRoute>} />
+        <Route path="/admin/issue"     element={<ProtectedRoute allowedRole="admin"><IssueBook /></ProtectedRoute>} />
+        <Route path="/admin/return"    element={<ProtectedRoute allowedRole="admin"><ReturnBook /></ProtectedRoute>} />
+        <Route path="/admin/nodues"    element={<ProtectedRoute allowedRole="admin"><NoDues /></ProtectedRoute>} />
+        <Route path="/admin/qrcodes"   element={<ProtectedRoute allowedRole="admin"><QRCodes /></ProtectedRoute>} />
+        <Route path="/admin/reports"   element={<ProtectedRoute allowedRole="admin"><Reports /></ProtectedRoute>} />
+        <Route path="/admin/settings"  element={<ProtectedRoute allowedRole="admin"><Settings /></ProtectedRoute>} />
 
         <Route path="/student" element={<ProtectedRoute allowedRole="student"><StudentDashboard /></ProtectedRoute>} />
         <Route path="/staff"   element={<ProtectedRoute allowedRole="student"><StaffDashboard /></ProtectedRoute>} />

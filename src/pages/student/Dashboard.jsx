@@ -3,6 +3,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { listenToBooks, listenToTransactions } from "../../firebase/firestore";
 import { getStudentInfo } from "../../utils/studentUtils";
+import SearchBar from "../../components/SearchBar";
 
 export default function StudentDashboard() {
   const { studentData, logout } = useAuth();
@@ -20,7 +21,9 @@ export default function StudentDashboard() {
 
   const handleLogout = async () => { await logout(); navigate("/login"); };
 
-  const myTxns     = transactions.filter((t) => t.borrowerId === studentData?.id || t.studentId === studentData?.id);
+  const myTxns     = transactions.filter(
+    (t) => t.borrowerId === studentData?.id || t.studentId === studentData?.id
+  );
   const issued     = myTxns.filter((t) => t.status === "issued");
   const available  = allBooks.filter((b) => b.available);
   const { yearLabel, sem } = getStudentInfo(studentData?.pin || "");
@@ -36,7 +39,6 @@ export default function StudentDashboard() {
       {/* Header */}
       <header style={{ background: "linear-gradient(135deg, #0D1F4E 0%, #1B4332 100%)" }}>
         <div className="max-w-5xl mx-auto px-4 sm:px-6">
-          {/* Top bar */}
           <div className="flex items-center justify-between py-3 border-b border-white/10">
             <div className="flex items-center gap-3">
               <img src="/logo.png" alt="" className="w-9 h-9 rounded-full object-cover border-2"
@@ -52,7 +54,6 @@ export default function StudentDashboard() {
             </button>
           </div>
 
-          {/* Student info */}
           <div className="py-5 flex items-center gap-4">
             <div className="w-14 h-14 rounded-full flex items-center justify-center text-2xl font-bold flex-shrink-0 border-2"
               style={{ background: "#C9A227", borderColor: "rgba(255,255,255,0.3)", color: "#0D1F4E" }}>
@@ -73,12 +74,11 @@ export default function StudentDashboard() {
             </div>
           </div>
 
-          {/* Stats */}
           <div className="grid grid-cols-3 gap-3 pb-5">
             {[
-              { label: "Issued to me",  value: issued.length,    color: "#C9A227" },
-              { label: "Available now", value: available.length,  color: "#4ade80" },
-              { label: "Total books",   value: allBooks.length,   color: "#93c5fd" },
+              { label: "Issued to me",  value: issued.length,   color: "#C9A227" },
+              { label: "Available now", value: available.length, color: "#4ade80" },
+              { label: "Total books",   value: allBooks.length,  color: "#93c5fd" },
             ].map(({ label, value, color }) => (
               <div key={label} className="text-center rounded-xl py-3"
                 style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.1)" }}>
@@ -90,14 +90,10 @@ export default function StudentDashboard() {
         </div>
       </header>
 
-      {/* Content */}
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
         {/* Tabs */}
         <div className="flex gap-2 mb-5 bg-white rounded-xl p-1 shadow-sm border border-gray-100 w-fit">
-          {[
-            { key: "issued",    label: "📤 My Issued Books" },
-            { key: "available", label: "📚 Available Books" },
-          ].map((t) => (
+          {[{ key: "issued", label: "📤 My Issued Books" }, { key: "available", label: "📚 Available Books" }].map((t) => (
             <button key={t.key} onClick={() => setActiveTab(t.key)}
               className="px-5 py-2 rounded-lg text-sm font-bold transition"
               style={activeTab === t.key
@@ -155,16 +151,25 @@ export default function StudentDashboard() {
         {/* Available */}
         {activeTab === "available" && (
           <>
-            <div className="mb-4">
-              <input type="text" placeholder="Search by title, author, or subject..."
-                value={search} onChange={(e) => setSearch(e.target.value)}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B6B35]/30 focus:border-[#1B6B35] bg-white shadow-sm" />
-            </div>
+            <SearchBar
+              value={search}
+              onChange={setSearch}
+              placeholder="Search by title, author, or subject..."
+              resultCount={filteredAvailable.length}
+              totalCount={available.length}
+              className="mb-4"
+            />
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               {filteredAvailable.length === 0 ? (
                 <div className="text-center py-16">
                   <p className="text-4xl mb-3">🔍</p>
-                  <p className="text-gray-500">No books found.</p>
+                  <p className="text-gray-500 font-medium">No books found</p>
+                  {search && (
+                    <button onClick={() => setSearch("")}
+                      className="mt-3 text-xs text-blue-600 hover:underline font-medium">
+                      Clear search
+                    </button>
+                  )}
                 </div>
               ) : (
                 <>
@@ -195,7 +200,7 @@ export default function StudentDashboard() {
                         <div>
                           <p className="font-bold text-gray-800 text-sm">{b.title}</p>
                           <p className="text-xs text-gray-500">{b.author}</p>
-                          <p className="text-xs text-gray-400 font-mono mt-0.5">{b.accessionNo || b.barcode}</p>
+                          <p className="text-xs text-gray-400 font-mono mt-1">{b.accessionNo || b.barcode}</p>
                         </div>
                       </div>
                     ))}
@@ -207,7 +212,6 @@ export default function StudentDashboard() {
         )}
       </div>
 
-      {/* Footer */}
       <div className="text-center py-6 text-gray-400 text-xs">
         Government Polytechnic Anakapalli · Library Management System
       </div>
