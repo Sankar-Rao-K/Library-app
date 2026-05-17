@@ -5,7 +5,7 @@ import {
   onSnapshot, serverTimestamp, writeBatch,
 } from "firebase/firestore";
 
-// ── BOOKS ───────────────────────────────────────────────────────────────
+// ── BOOKS ────────────────────────────────────────────────────────────
 
 export const addBook = (data) =>
   addDoc(collection(db, "books"), { ...data, createdAt: serverTimestamp() });
@@ -30,7 +30,8 @@ export const updateBook = (id, data) =>
   updateDoc(doc(db, "books", id), data);
 
 export const deleteBook = (id) => deleteDoc(doc(db, "books", id));
-// ── STUDENTS ────────────────────────────────────────────────────────────
+
+// ── STUDENTS ──────────────────────────────────────────────────────────
 
 export const addStudent = (data) =>
   addDoc(collection(db, "students"), { ...data, createdAt: serverTimestamp() });
@@ -67,7 +68,15 @@ export const getStudentByPinAndBranch = async (pin, branch) => {
   return { id: snap.docs[0].id, ...snap.docs[0].data() };
 };
 
-export const deleteStudent = (id) => deleteDoc(doc(db, "students", id));
+export const deleteStudent = async (id) => {
+  // Also delete any saved QR codes linked to this student
+  const qrQ = query(collection(db, "qrCodes"), where("linkedId", "==", id));
+  const qrSnap = await getDocs(qrQ);
+  const batch = writeBatch(db);
+  qrSnap.docs.forEach((d) => batch.delete(d.ref));
+  batch.delete(doc(db, "students", id));
+  await batch.commit();
+};
 
 export const autoDeletePassedOutStudents = async () => {
   const now = new Date();
@@ -90,14 +99,20 @@ export const autoDeletePassedOutStudents = async () => {
     );
     const txnSnap = await getDocs(txnQ);
     if (txnSnap.empty) {
-      await deleteDoc(doc(db, "students", d.id));
+      // Also delete linked QR codes
+      const qrQ = query(collection(db, "qrCodes"), where("linkedId", "==", d.id));
+      const qrSnap = await getDocs(qrQ);
+      const batch = writeBatch(db);
+      qrSnap.docs.forEach((qd) => batch.delete(qd.ref));
+      batch.delete(doc(db, "students", d.id));
+      await batch.commit();
       deleted.push(s.name);
     }
   }
   return deleted;
 };
 
-// ── STAFF ───────────────────────────────────────────────────────────────
+// ── STAFF ─────────────────────────────────────────────────────────────
 
 export const addStaff = (data) =>
   addDoc(collection(db, "staff"), { ...data, createdAt: serverTimestamp() });
@@ -135,16 +150,26 @@ export const getStaffByIdAndSection = async (staffId, section) => {
 };
 
 export const deleteStaff = (id) => deleteDoc(doc(db, "staff", id));
-
-export const updateStaff = (id, data) =>
-  updateDoc(doc(db, "staff", id), data);
+export const updateStaff = (id, data) => updateDoc(doc(db, "staff", id), data);
 
 export const listenToStaff = (cb) =>
   onSnapshot(collection(db, "staff"), (snap) =>
     cb(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
   );
 
-// ── TRANSACTIONS ────────────────────────────────────────────────────────
+// ── SAVED QR CODES ────────────────────────────────────────────────────
+
+export const saveQRCode = (data) =>
+  addDoc(collection(db, "qrCodes"), { ...data, createdAt: serverTimestamp() });
+
+export const deleteQRCode = (id) => deleteDoc(doc(db, "qrCodes", id));
+
+export const listenToQRCodes = (cb) =>
+  onSnapshot(collection(db, "qrCodes"), (snap) =>
+    cb(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+  );
+
+// ── TRANSACTIONS ──────────────────────────────────────────────────────
 
 export const issueBook = (data) =>
   addDoc(collection(db, "transactions"), {
@@ -172,7 +197,6 @@ export const getActiveTransaction = async (borrowerId, bookId) => {
   return { id: snap.docs[0].id, ...snap.docs[0].data() };
 };
 
-// Legacy support (studentId field)
 export const getActiveTransactionLegacy = async (studentId, bookId) => {
   const q = query(
     collection(db, "transactions"),
@@ -186,7 +210,6 @@ export const getActiveTransactionLegacy = async (studentId, bookId) => {
 };
 
 export const getTransactionsByBorrower = async (borrowerId) => {
-  // Try borrowerId first, fall back to studentId
   const q1 = query(collection(db, "transactions"), where("borrowerId", "==", borrowerId));
   const q2 = query(collection(db, "transactions"), where("studentId", "==", borrowerId));
   const [s1, s2] = await Promise.all([getDocs(q1), getDocs(q2)]);
@@ -197,7 +220,7 @@ export const getTransactionsByBorrower = async (borrowerId) => {
     .map((d) => ({ id: d.id, ...d.data() }));
 };
 
-// ── REAL-TIME LISTENERS ─────────────────────────────────────────────────
+// ── REAL-TIME LISTENERS ───────────────────────────────────────────────
 
 export const listenToBooks = (cb) =>
   onSnapshot(collection(db, "books"), (snap) =>

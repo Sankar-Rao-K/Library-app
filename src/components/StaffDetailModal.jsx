@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { listenToTransactions, deleteStaff } from "../firebase/firestore";
+import DoubleConfirmModal from "./DoubleConfirmModal";
 
 function TxnCard({ t }) {
   return (
@@ -24,30 +25,11 @@ function TxnCard({ t }) {
   );
 }
 
-function DoubleConfirmDelete({ expected, onConfirm, onCancel, loading }) {
-  const [value, setValue] = useState("");
-  const matches = value.trim().toLowerCase() === expected.trim().toLowerCase();
-  return (
-    <div className="space-y-2">
-      <input type="text" value={value} onChange={(e) => setValue(e.target.value)}
-        placeholder={`Type "${expected}"`}
-        className="w-full bg-red-900/30 border border-red-400/40 rounded-lg px-3 py-2 text-sm text-white placeholder-red-400/60 focus:outline-none" />
-      <div className="flex gap-2">
-        <button onClick={onCancel} className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs py-1.5 rounded-lg">Cancel</button>
-        <button onClick={onConfirm} disabled={!matches || loading}
-          className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-red-900 disabled:text-red-600 text-white text-xs py-1.5 rounded-lg font-bold">
-          {loading ? "Deleting..." : "🗑️ Delete Forever"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function StaffDetailModal({ staff, onClose, onDeleted }) {
   const [transactions, setTransactions] = useState([]);
-  const [activeTab, setActiveTab] = useState("issued");
-  const [deleteStep, setDeleteStep] = useState(0);
-  const [deleting, setDeleting] = useState(false);
+  const [activeTab, setActiveTab]       = useState("issued");
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting]         = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -78,24 +60,36 @@ export default function StaffDetailModal({ staff, onClose, onDeleted }) {
       alert("Error: " + err.message);
     }
     setDeleting(false);
+    setShowDeleteModal(false);
   };
 
   const handleIssue  = () => { onClose(); navigate("/admin/issue",  { state: { prefillId: staff.staffId, borrowerType: "staff" } }); };
   const handleReturn = () => { onClose(); navigate("/admin/return", { state: { prefillId: staff.staffId, borrowerType: "staff" } }); };
 
   const sectionColors = {
-    ECE: "bg-blue-500/30 text-blue-200",
-    CME: "bg-green-500/30 text-green-200",
+    ECE:     "bg-blue-500/30 text-blue-200",
+    CME:     "bg-green-500/30 text-green-200",
     GENERAL: "bg-purple-500/30 text-purple-200",
-    OFFICE: "bg-yellow-500/30 text-yellow-200",
+    OFFICE:  "bg-yellow-500/30 text-yellow-200",
   };
 
   return (
     <>
+      {showDeleteModal && (
+        <DoubleConfirmModal
+          title={`Delete ${staff.name}?`}
+          description={`This will permanently remove the staff record for ${staff.name} (${staff.staffId}). Their transaction history will remain. This action cannot be undone.`}
+          confirmWord={staff.name}
+          askReason={false}
+          onConfirm={handleDelete}
+          onCancel={() => setShowDeleteModal(false)}
+          loading={deleting}
+        />
+      )}
+
       <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
       <div className="fixed right-0 top-0 h-full w-full max-w-lg bg-white shadow-2xl z-50 flex flex-col overflow-hidden">
 
-        {/* Header */}
         <div className="bg-gray-900 text-white px-5 py-4 flex-shrink-0">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
@@ -118,7 +112,6 @@ export default function StaffDetailModal({ staff, onClose, onDeleted }) {
             <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl leading-none flex-shrink-0">✕</button>
           </div>
 
-          {/* Actions */}
           <div className="flex gap-2 mt-4">
             <button onClick={handleIssue}
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 rounded-lg transition flex items-center justify-center gap-1.5">
@@ -128,40 +121,18 @@ export default function StaffDetailModal({ staff, onClose, onDeleted }) {
               className="flex-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold py-2 rounded-lg transition flex items-center justify-center gap-1.5">
               ↩️ Return Book
             </button>
-            {deleteStep === 0 && (
-              <button onClick={() => setDeleteStep(1)}
-                className="bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-semibold py-2 px-3 rounded-lg transition">
-                🗑️
-              </button>
-            )}
+            <button onClick={() => setShowDeleteModal(true)}
+              className="bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-semibold py-2 px-3 rounded-lg transition">
+              🗑️
+            </button>
           </div>
-
-          {deleteStep === 1 && (
-            <div className="mt-3 bg-red-900/40 border border-red-500/40 rounded-lg p-3">
-              <p className="text-sm text-red-200 font-medium mb-2">⚠️ Delete <span className="font-bold">{staff.name}</span>?</p>
-              <p className="text-xs text-red-300 mb-3">Staff record will be removed. Transactions remain.</p>
-              <div className="flex gap-2">
-                <button onClick={() => setDeleteStep(0)} className="flex-1 bg-gray-700 text-gray-300 text-xs py-1.5 rounded-lg">Cancel</button>
-                <button onClick={() => setDeleteStep(2)} className="flex-1 bg-red-600 text-white text-xs py-1.5 rounded-lg font-semibold">Yes, continue</button>
-              </div>
-            </div>
-          )}
-
-          {deleteStep === 2 && (
-            <div className="mt-3 bg-red-900/60 border border-red-400/60 rounded-lg p-3">
-              <p className="text-sm text-white font-bold mb-1">🚨 Are you absolutely sure?</p>
-              <p className="text-xs text-red-300 mb-3">This <span className="font-bold underline">cannot be undone</span>. Type the staff name:</p>
-              <DoubleConfirmDelete expected={staff.name} onConfirm={handleDelete} onCancel={() => setDeleteStep(0)} loading={deleting} />
-            </div>
-          )}
         </div>
 
-        {/* Stats */}
         <div className="grid grid-cols-3 border-b border-gray-100 flex-shrink-0">
           {[
-            { label: "Total",    value: transactions.length, color: "text-blue-600" },
+            { label: "Total",    value: transactions.length, color: "text-blue-600"   },
             { label: "Issued",   value: issued.length,       color: "text-yellow-600" },
-            { label: "Returned", value: returned.length,     color: "text-green-600" },
+            { label: "Returned", value: returned.length,     color: "text-green-600"  },
           ].map(({ label, value, color }) => (
             <div key={label} className="px-4 py-3 text-center border-r border-gray-100 last:border-0">
               <p className={`text-xl font-bold ${color}`}>{value}</p>
@@ -170,7 +141,6 @@ export default function StaffDetailModal({ staff, onClose, onDeleted }) {
           ))}
         </div>
 
-        {/* Tabs */}
         <div className="flex border-b border-gray-100 bg-gray-50 flex-shrink-0">
           {[{ key: "issued", label: "📤 Currently Issued" }, { key: "history", label: "📋 Full History" }].map((t) => (
             <button key={t.key} onClick={() => setActiveTab(t.key)}
@@ -182,7 +152,6 @@ export default function StaffDetailModal({ staff, onClose, onDeleted }) {
           ))}
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {activeTab === "issued" && (
             <div>
@@ -204,7 +173,7 @@ export default function StaffDetailModal({ staff, onClose, onDeleted }) {
                       <div key={t.id} className="bg-yellow-50 border border-yellow-100 rounded-xl p-4">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-gray-800 text-sm leading-tight">{t.bookTitle}</p>
+                            <p className="font-semibold text-gray-800 text-sm">{t.bookTitle}</p>
                             <p className="text-xs text-gray-400 font-mono mt-0.5">{t.barcode}</p>
                           </div>
                           <span className="bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0">Issued</span>
@@ -228,7 +197,6 @@ export default function StaffDetailModal({ staff, onClose, onDeleted }) {
               )}
             </div>
           )}
-
           {activeTab === "history" && (
             <div>
               {allTxns.length === 0 ? (
