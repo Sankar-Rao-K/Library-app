@@ -78,6 +78,9 @@ export const deleteStudent = async (id) => {
   await batch.commit();
 };
 
+export const updateStudent = (id, data) =>
+  updateDoc(doc(db, "students", id), data);
+
 export const autoDeletePassedOutStudents = async () => {
   const now = new Date();
   const month = now.getMonth() + 1;

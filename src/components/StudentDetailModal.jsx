@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { listenToTransactions, deleteStudent } from "../firebase/firestore";
 import { getStudentInfo } from "../utils/studentUtils";
-import DoubleConfirmModal from "./DoubleConfirmModal";
 
 function TxnCard({ t }) {
   return (
@@ -26,19 +25,43 @@ function TxnCard({ t }) {
   );
 }
 
+function DoubleConfirmDelete({ expected, onConfirm, onCancel, loading }) {
+  const [value, setValue] = useState("");
+  const matches = value.trim().toLowerCase() === expected.trim().toLowerCase();
+  return (
+    <div className="space-y-2">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={`Type "${expected}"`}
+        className="w-full bg-red-900/30 border border-red-400/40 rounded-lg px-3 py-2 text-sm text-white placeholder-red-400/60 focus:outline-none focus:ring-2 focus:ring-red-400"
+      />
+      <div className="flex gap-2">
+        <button onClick={onCancel}
+          className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs py-1.5 rounded-lg transition">
+          Cancel
+        </button>
+        <button onClick={onConfirm} disabled={!matches || loading}
+          className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-red-900 disabled:text-red-600 text-white text-xs py-1.5 rounded-lg font-bold transition">
+          {loading ? "Deleting..." : "Delete Permanently"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function StudentDetailModal({ student, onClose, onDeleted }) {
   const [transactions, setTransactions] = useState([]);
   const [activeTab, setActiveTab]       = useState("issued");
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteStep, setDeleteStep]     = useState(0);
   const [deleting, setDeleting]         = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!student) return;
     const unsub = listenToTransactions((all) =>
-      setTransactions(all.filter(
-        (t) => t.studentId === student.id || t.borrowerId === student.id
-      ))
+      setTransactions(all.filter((t) => t.studentId === student.id || t.borrowerId === student.id))
     );
     return () => unsub();
   }, [student]);
@@ -64,7 +87,7 @@ export default function StudentDetailModal({ student, onClose, onDeleted }) {
   const historyBySem = groupBySem(allTxns);
   const semKeys = Object.keys(historyBySem).sort();
 
-  const handleDelete = async (reason) => {
+  const handleDelete = async () => {
     setDeleting(true);
     try {
       await deleteStudent(student.id);
@@ -74,7 +97,6 @@ export default function StudentDetailModal({ student, onClose, onDeleted }) {
       alert("Error deleting: " + err.message);
     }
     setDeleting(false);
-    setShowDeleteModal(false);
   };
 
   const handleIssue  = () => { onClose(); navigate("/admin/issue",  { state: { prefillPin: student.pin } }); };
@@ -82,18 +104,6 @@ export default function StudentDetailModal({ student, onClose, onDeleted }) {
 
   return (
     <>
-      {showDeleteModal && (
-        <DoubleConfirmModal
-          title={`Delete ${student.name}?`}
-          description={`This will permanently remove the student record for ${student.name} (${student.pin}). Their transaction history will remain for records. This action cannot be undone.`}
-          confirmWord={student.name}
-          askReason={true}
-          onConfirm={handleDelete}
-          onCancel={() => setShowDeleteModal(false)}
-          loading={deleting}
-        />
-      )}
-
       <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
 
       <div className="fixed right-0 top-0 h-full w-full max-w-lg bg-white shadow-2xl z-50 flex flex-col overflow-hidden">
@@ -110,17 +120,17 @@ export default function StudentDetailModal({ student, onClose, onDeleted }) {
                 <p className="text-gray-400 text-xs font-mono mt-0.5">{student.pin}</p>
                 <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                   <span className="bg-blue-500/30 text-blue-200 px-2 py-0.5 rounded-full text-xs">{student.branch}</span>
-                  {isOld ? (
-                    <span className="bg-gray-500/30 text-gray-300 px-2 py-0.5 rounded-full text-xs">Passed Out</span>
-                  ) : (
-                    <span className="bg-green-500/30 text-green-200 px-2 py-0.5 rounded-full text-xs">{yearLabel} · {sem}</span>
-                  )}
+                  {isOld
+                    ? <span className="bg-gray-500/30 text-gray-300 px-2 py-0.5 rounded-full text-xs">Passed Out</span>
+                    : <span className="bg-green-500/30 text-green-200 px-2 py-0.5 rounded-full text-xs">{yearLabel} · {sem}</span>
+                  }
                 </div>
               </div>
             </div>
             <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl leading-none flex-shrink-0">✕</button>
           </div>
 
+          {/* Action Buttons */}
           <div className="flex gap-2 mt-4">
             <button onClick={handleIssue}
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 rounded-lg transition flex items-center justify-center gap-1.5">
@@ -130,11 +140,51 @@ export default function StudentDetailModal({ student, onClose, onDeleted }) {
               className="flex-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold py-2 rounded-lg transition flex items-center justify-center gap-1.5">
               ↩️ Return Book
             </button>
-            <button onClick={() => setShowDeleteModal(true)}
-              className="bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-semibold py-2 px-3 rounded-lg transition">
-              🗑️
-            </button>
+            {deleteStep === 0 && (
+              <button onClick={() => setDeleteStep(1)}
+                className="bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-semibold py-2 px-3 rounded-lg transition whitespace-nowrap">
+                Delete
+              </button>
+            )}
           </div>
+
+          {/* Delete step 1 */}
+          {deleteStep === 1 && (
+            <div className="mt-3 bg-red-900/40 border border-red-500/40 rounded-lg p-3">
+              <p className="text-sm text-red-200 font-medium mb-1">
+                Delete <span className="font-bold">{student.name}</span>?
+              </p>
+              <p className="text-xs text-red-300 mb-3">
+                This will remove the student record. Transactions will remain.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setDeleteStep(0)}
+                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs py-1.5 rounded-lg">
+                  Cancel
+                </button>
+                <button onClick={() => setDeleteStep(2)}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white text-xs py-1.5 rounded-lg font-semibold">
+                  Yes, continue
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Delete step 2 */}
+          {deleteStep === 2 && (
+            <div className="mt-3 bg-red-900/60 border border-red-400/60 rounded-lg p-3">
+              <p className="text-sm text-white font-bold mb-1">Final confirmation</p>
+              <p className="text-xs text-red-300 mb-3">
+                This <span className="font-bold underline">cannot be undone</span>. Type the student's name to confirm:
+              </p>
+              <DoubleConfirmDelete
+                expected={student.name}
+                onConfirm={handleDelete}
+                onCancel={() => setDeleteStep(0)}
+                loading={deleting}
+              />
+            </div>
+          )}
         </div>
 
         {/* Stats */}
@@ -165,6 +215,7 @@ export default function StudentDetailModal({ student, onClose, onDeleted }) {
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
+
           {activeTab === "issued" && (
             <div>
               {issued.length === 0 ? (
