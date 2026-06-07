@@ -1,11 +1,11 @@
-import { db } from "./config";
 import {
   collection, addDoc, getDocs, getDoc,
   doc, updateDoc, deleteDoc, query, where,
   onSnapshot, serverTimestamp, writeBatch,
 } from "firebase/firestore";
+import { db } from "./config";
 
-// ── BOOKS ────────────────────────────────────────────────────────────
+// ── BOOKS ─────────────────────────────────────────────────────────────
 
 export const addBook = (data) =>
   addDoc(collection(db, "books"), { ...data, createdAt: serverTimestamp() });
@@ -20,7 +20,7 @@ export const addBooksBatch = async (books) => {
 };
 
 export const getBookByBarcode = async (barcode) => {
-  const q = query(collection(db, "books"), where("barcode", "==", barcode));
+  const q    = query(collection(db, "books"), where("barcode", "==", barcode));
   const snap = await getDocs(q);
   if (snap.empty) return null;
   return { id: snap.docs[0].id, ...snap.docs[0].data() };
@@ -51,7 +51,7 @@ export const getExistingPins = async () => {
 };
 
 export const getStudentByPin = async (pin) => {
-  const q = query(collection(db, "students"), where("pin", "==", pin));
+  const q    = query(collection(db, "students"), where("pin", "==", pin));
   const snap = await getDocs(q);
   if (snap.empty) return null;
   return { id: snap.docs[0].id, ...snap.docs[0].data() };
@@ -60,7 +60,7 @@ export const getStudentByPin = async (pin) => {
 export const getStudentByPinAndBranch = async (pin, branch) => {
   const q = query(
     collection(db, "students"),
-    where("pin", "==", pin),
+    where("pin",    "==", pin),
     where("branch", "==", branch)
   );
   const snap = await getDocs(q);
@@ -69,10 +69,9 @@ export const getStudentByPinAndBranch = async (pin, branch) => {
 };
 
 export const deleteStudent = async (id) => {
-  // Also delete any saved QR codes linked to this student
-  const qrQ = query(collection(db, "qrCodes"), where("linkedId", "==", id));
+  const qrQ   = query(collection(db, "qrCodes"), where("linkedId", "==", id));
   const qrSnap = await getDocs(qrQ);
-  const batch = writeBatch(db);
+  const batch  = writeBatch(db);
   qrSnap.docs.forEach((d) => batch.delete(d.ref));
   batch.delete(doc(db, "students", id));
   await batch.commit();
@@ -82,12 +81,13 @@ export const updateStudent = (id, data) =>
   updateDoc(doc(db, "students", id), data);
 
 export const autoDeletePassedOutStudents = async () => {
-  const now = new Date();
-  const month = now.getMonth() + 1;
-  const currentYear = now.getFullYear();
+  const now               = new Date();
+  const month             = now.getMonth() + 1;
+  const currentYear       = now.getFullYear();
   const academicYearStart = month >= 7 ? currentYear : currentYear - 1;
-  const snap = await getDocs(collection(db, "students"));
-  const deleted = [];
+  const snap              = await getDocs(collection(db, "students"));
+  const deleted           = [];
+
   for (const d of snap.docs) {
     const s = d.data();
     if (!s.pin) continue;
@@ -95,22 +95,22 @@ export const autoDeletePassedOutStudents = async () => {
     if (isNaN(joinYearShort)) continue;
     const studyYear = (academicYearStart - (2000 + joinYearShort)) + 1;
     if (studyYear <= 3) continue;
-    const txnQ = query(
+
+    const txnQ   = query(
       collection(db, "transactions"),
       where("studentId", "==", d.id),
-      where("status", "==", "issued")
+      where("status",    "==", "issued")
     );
     const txnSnap = await getDocs(txnQ);
-    if (txnSnap.empty) {
-      // Also delete linked QR codes
-      const qrQ = query(collection(db, "qrCodes"), where("linkedId", "==", d.id));
-      const qrSnap = await getDocs(qrQ);
-      const batch = writeBatch(db);
-      qrSnap.docs.forEach((qd) => batch.delete(qd.ref));
-      batch.delete(doc(db, "students", d.id));
-      await batch.commit();
-      deleted.push(s.name);
-    }
+    if (!txnSnap.empty) continue;
+
+    const qrQ   = query(collection(db, "qrCodes"), where("linkedId", "==", d.id));
+    const qrSnap = await getDocs(qrQ);
+    const batch  = writeBatch(db);
+    qrSnap.docs.forEach((qd) => batch.delete(qd.ref));
+    batch.delete(doc(db, "students", d.id));
+    await batch.commit();
+    deleted.push(s.name);
   }
   return deleted;
 };
@@ -135,7 +135,7 @@ export const getExistingStaffIds = async () => {
 };
 
 export const getStaffByStaffId = async (staffId) => {
-  const q = query(collection(db, "staff"), where("staffId", "==", staffId));
+  const q    = query(collection(db, "staff"), where("staffId", "==", staffId));
   const snap = await getDocs(q);
   if (snap.empty) return null;
   return { id: snap.docs[0].id, ...snap.docs[0].data() };
@@ -152,8 +152,8 @@ export const getStaffByIdAndSection = async (staffId, section) => {
   return { id: snap.docs[0].id, ...snap.docs[0].data() };
 };
 
-export const deleteStaff = (id) => deleteDoc(doc(db, "staff", id));
-export const updateStaff = (id, data) => updateDoc(doc(db, "staff", id), data);
+export const deleteStaff  = (id)       => deleteDoc(doc(db, "staff", id));
+export const updateStaff  = (id, data) => updateDoc(doc(db, "staff", id), data);
 
 export const listenToStaff = (cb) =>
   onSnapshot(collection(db, "staff"), (snap) =>
@@ -177,14 +177,14 @@ export const listenToQRCodes = (cb) =>
 export const issueBook = (data) =>
   addDoc(collection(db, "transactions"), {
     ...data,
-    issueDate: serverTimestamp(),
+    issueDate:  serverTimestamp(),
     returnDate: null,
-    status: "issued",
+    status:     "issued",
   });
 
 export const returnBook = (txnId) =>
   updateDoc(doc(db, "transactions", txnId), {
-    status: "returned",
+    status:     "returned",
     returnDate: serverTimestamp(),
   });
 
@@ -192,8 +192,8 @@ export const getActiveTransaction = async (borrowerId, bookId) => {
   const q = query(
     collection(db, "transactions"),
     where("borrowerId", "==", borrowerId),
-    where("bookId", "==", bookId),
-    where("status", "==", "issued")
+    where("bookId",     "==", bookId),
+    where("status",     "==", "issued")
   );
   const snap = await getDocs(q);
   if (snap.empty) return null;
@@ -204,8 +204,8 @@ export const getActiveTransactionLegacy = async (studentId, bookId) => {
   const q = query(
     collection(db, "transactions"),
     where("studentId", "==", studentId),
-    where("bookId", "==", bookId),
-    where("status", "==", "issued")
+    where("bookId",    "==", bookId),
+    where("status",    "==", "issued")
   );
   const snap = await getDocs(q);
   if (snap.empty) return null;
@@ -214,13 +214,12 @@ export const getActiveTransactionLegacy = async (studentId, bookId) => {
 
 export const getTransactionsByBorrower = async (borrowerId) => {
   const q1 = query(collection(db, "transactions"), where("borrowerId", "==", borrowerId));
-  const q2 = query(collection(db, "transactions"), where("studentId", "==", borrowerId));
+  const q2 = query(collection(db, "transactions"), where("studentId",  "==", borrowerId));
   const [s1, s2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-  const all = [...s1.docs, ...s2.docs];
   const seen = new Set();
-  return all
+  return [...s1.docs, ...s2.docs]
     .filter((d) => { if (seen.has(d.id)) return false; seen.add(d.id); return true; })
-    .map((d) => ({ id: d.id, ...d.data() }));
+    .map((d)    => ({ id: d.id, ...d.data() }));
 };
 
 // ── REAL-TIME LISTENERS ───────────────────────────────────────────────
@@ -239,3 +238,61 @@ export const listenToTransactions = (cb) =>
   onSnapshot(collection(db, "transactions"), (snap) =>
     cb(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
   );
+
+// ── DATA INTEGRITY ────────────────────────────────────────────────────
+
+/**
+ * fixBookAvailability()
+ *
+ * Finds every book where available === false but no active issued
+ * transaction exists for it, then resets those books to available: true.
+ *
+ * Returns { fixed: number, scanned: number }
+ */
+export async function fixBookAvailability() {
+  // 1. Books currently marked unavailable
+  const booksSnap = await getDocs(
+    query(collection(db, "books"), where("available", "==", false))
+  );
+  if (booksSnap.empty) return { fixed: 0, scanned: 0 };
+
+  // 2. All active (issued) transactions
+  const txnSnap = await getDocs(
+    query(collection(db, "transactions"), where("status", "==", "issued"))
+  );
+
+  // Sets of genuinely issued book references
+  const issuedBookIds  = new Set();
+  const issuedBarcodes = new Set();
+  txnSnap.forEach((d) => {
+    const t = d.data();
+    if (t.bookId)  issuedBookIds.add(t.bookId);
+    if (t.barcode) issuedBarcodes.add(t.barcode);
+  });
+
+  // 3. Collect books with no matching transaction
+  const toFix = [];
+  booksSnap.forEach((d) => {
+    const b = d.data();
+    const isReallyIssued =
+      issuedBookIds.has(d.id) ||
+      (b.barcode     && issuedBarcodes.has(b.barcode)) ||
+      (b.accessionNo && issuedBarcodes.has(b.accessionNo));
+    if (!isReallyIssued) toFix.push(d.id);
+  });
+
+  if (toFix.length === 0) return { fixed: 0, scanned: booksSnap.size };
+
+  // 4. Batch-update in groups of 500 (Firestore write limit)
+  let fixed = 0;
+  for (let i = 0; i < toFix.length; i += 500) {
+    const batch = writeBatch(db);
+    toFix.slice(i, i + 500).forEach((id) => {
+      batch.update(doc(db, "books", id), { available: true });
+      fixed++;
+    });
+    await batch.commit();
+  }
+
+  return { fixed, scanned: booksSnap.size };
+}
