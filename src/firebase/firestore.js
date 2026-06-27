@@ -4,6 +4,7 @@ import {
   onSnapshot, serverTimestamp, writeBatch,
 } from "firebase/firestore";
 import { db } from "./config";
+import { getStudentInfo } from "../utils/studentUtils";
 
 // ── BOOKS ─────────────────────────────────────────────────────────────
 
@@ -69,7 +70,7 @@ export const getStudentByPinAndBranch = async (pin, branch) => {
 };
 
 export const deleteStudent = async (id) => {
-  const qrQ   = query(collection(db, "qrCodes"), where("linkedId", "==", id));
+  const qrQ    = query(collection(db, "qrCodes"), where("linkedId", "==", id));
   const qrSnap = await getDocs(qrQ);
   const batch  = writeBatch(db);
   qrSnap.docs.forEach((d) => batch.delete(d.ref));
@@ -80,40 +81,80 @@ export const deleteStudent = async (id) => {
 export const updateStudent = (id, data) =>
   updateDoc(doc(db, "students", id), data);
 
-export const autoDeletePassedOutStudents = async () => {
-  const now               = new Date();
-  const month             = now.getMonth() + 1;
-  const currentYear       = now.getFullYear();
-  const academicYearStart = month >= 7 ? currentYear : currentYear - 1;
-  const snap              = await getDocs(collection(db, "students"));
-  const deleted           = [];
+/**
+ * autoDeletePassedOutStudents()
+ *
+ * Runs on Students portal load.
+ * Uses getStudentInfo() semester schedule to detect passed-out students.
+ * Deletes any passed-out student who has zero active issued transactions.
+ *
+ * Returns: array of deleted student names.
+ */
+export async function autoDeletePassedOutStudents() {
+  const snap    = await getDocs(collection(db, "students"));
+  const deleted = [];
 
   for (const d of snap.docs) {
     const s = d.data();
     if (!s.pin) continue;
-    const joinYearShort = parseInt(String(s.pin).substring(0, 2), 10);
-    if (isNaN(joinYearShort)) continue;
-    const studyYear = (academicYearStart - (2000 + joinYearShort)) + 1;
-    if (studyYear <= 3) continue;
 
-    const txnQ   = query(
-      collection(db, "transactions"),
-      where("studentId", "==", d.id),
-      where("status",    "==", "issued")
+    const { isPassedOut } = getStudentInfo(s.pin);
+    if (!isPassedOut) continue;           // still studying — skip
+
+    // Check active dues via both field names (modern + legacy)
+    const [s1, s2] = await Promise.all([
+      getDocs(query(collection(db, "transactions"),
+        where("borrowerId", "==", d.id), where("status", "==", "issued"))),
+      getDocs(query(collection(db, "transactions"),
+        where("studentId",  "==", d.id), where("status", "==", "issued"))),
+    ]);
+    if (s1.size + s2.size > 0) continue;  // has dues — skip for now
+
+    // Passed out + zero dues → delete student + linked QR codes
+    const qrSnap = await getDocs(
+      query(collection(db, "qrCodes"), where("linkedId", "==", d.id))
     );
-    const txnSnap = await getDocs(txnQ);
-    if (!txnSnap.empty) continue;
-
-    const qrQ   = query(collection(db, "qrCodes"), where("linkedId", "==", d.id));
-    const qrSnap = await getDocs(qrQ);
-    const batch  = writeBatch(db);
+    const batch = writeBatch(db);
     qrSnap.docs.forEach((qd) => batch.delete(qd.ref));
     batch.delete(doc(db, "students", d.id));
     await batch.commit();
-    deleted.push(s.name);
+
+    deleted.push(s.name || d.id);
   }
   return deleted;
-};
+}
+
+/**
+ * checkAndDeletePassedOutStudent(studentId, pin)
+ *
+ * Call immediately after a successful book return.
+ * If the student is passed out AND now has zero active dues → auto-delete.
+ *
+ * Returns: true if deleted, false otherwise.
+ */
+export async function checkAndDeletePassedOutStudent(studentId, pin) {
+  const { isPassedOut } = getStudentInfo(pin);
+  if (!isPassedOut) return false;         // still studying — do nothing
+
+  // Check remaining dues after this return
+  const [s1, s2] = await Promise.all([
+    getDocs(query(collection(db, "transactions"),
+      where("borrowerId", "==", studentId), where("status", "==", "issued"))),
+    getDocs(query(collection(db, "transactions"),
+      where("studentId",  "==", studentId), where("status", "==", "issued"))),
+  ]);
+  if (s1.size + s2.size > 0) return false; // still has other books out — wait
+
+  // All clear + passed out → delete
+  const qrSnap = await getDocs(
+    query(collection(db, "qrCodes"), where("linkedId", "==", studentId))
+  );
+  const batch = writeBatch(db);
+  qrSnap.docs.forEach((d) => batch.delete(d.ref));
+  batch.delete(doc(db, "students", studentId));
+  await batch.commit();
+  return true;
+}
 
 // ── STAFF ─────────────────────────────────────────────────────────────
 
@@ -250,18 +291,15 @@ export const listenToTransactions = (cb) =>
  * Returns { fixed: number, scanned: number }
  */
 export async function fixBookAvailability() {
-  // 1. Books currently marked unavailable
   const booksSnap = await getDocs(
     query(collection(db, "books"), where("available", "==", false))
   );
   if (booksSnap.empty) return { fixed: 0, scanned: 0 };
 
-  // 2. All active (issued) transactions
   const txnSnap = await getDocs(
     query(collection(db, "transactions"), where("status", "==", "issued"))
   );
 
-  // Sets of genuinely issued book references
   const issuedBookIds  = new Set();
   const issuedBarcodes = new Set();
   txnSnap.forEach((d) => {
@@ -270,7 +308,6 @@ export async function fixBookAvailability() {
     if (t.barcode) issuedBarcodes.add(t.barcode);
   });
 
-  // 3. Collect books with no matching transaction
   const toFix = [];
   booksSnap.forEach((d) => {
     const b = d.data();
@@ -283,7 +320,6 @@ export async function fixBookAvailability() {
 
   if (toFix.length === 0) return { fixed: 0, scanned: booksSnap.size };
 
-  // 4. Batch-update in groups of 500 (Firestore write limit)
   let fixed = 0;
   for (let i = 0; i < toFix.length; i += 500) {
     const batch = writeBatch(db);
