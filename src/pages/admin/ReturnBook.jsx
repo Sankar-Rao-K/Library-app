@@ -1,145 +1,124 @@
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import AdminLayout from "../../components/AdminLayout";
-import QRScannerModal from "../../components/QRScannerModal";
 import {
   getStudentByPin, getBookByBarcode,
   returnBook, updateBook, getActiveTransaction,
-  getStaffByStaffId, getTransactionsByBorrower,
+  getTransactionsByBorrower,
 } from "../../firebase/firestore";
 
-const STEPS = { ID: "id", BOOK: "book", CONFIRM: "confirm", SUCCESS: "success" };
+const STEPS = { PIN: "pin", BARCODE: "barcode", CONFIRM: "confirm", SUCCESS: "success" };
 
 export default function ReturnBook() {
-  const location  = useLocation();
-  const prefillId = location.state?.prefillPin || location.state?.prefillId || "";
-  const bType     = location.state?.borrowerType || "";
+  const location   = useLocation();
+  const prefillPin = location.state?.prefillPin || "";
 
-  const [step, setStep]               = useState(STEPS.ID);
-  const [idValue, setIdValue]         = useState(prefillId);
-  const [accessCode, setAccessCode]   = useState("");
-  const [borrower, setBorrower]       = useState(null);
-  const [book, setBook]               = useState(null);
-  const [transaction, setTransaction] = useState(null);
-  const [activeIssues, setActiveIssues] = useState([]); // books currently issued
-  const [error, setError]             = useState("");
-  const [loading, setLoading]         = useState(false);
-  const [scanner, setScanner]         = useState(null);
-  const [notIssuedInfo, setNotIssuedInfo] = useState(null);
+  const [step,         setStep]        = useState(STEPS.PIN);
+  const [pin,          setPin]         = useState(prefillPin);
+  const [barcode,      setBarcode]     = useState("");
+  const [student,      setStudent]     = useState(null);
+  const [book,         setBook]        = useState(null);
+  const [transaction,  setTransaction] = useState(null);
+  const [issuedBooks,  setIssuedBooks] = useState([]);  // currently issued for this student
+  const [error,        setError]       = useState("");
+  const [loading,      setLoading]     = useState(false);
+  const barcodeRef = useRef(null);
 
-  const accessRef = useRef(null);
-
-  // Pre-fill from navigation
+  // Auto-fetch student when navigated with prefillPin
   useEffect(() => {
-    if (!prefillId) return;
-    (async () => {
+    if (!prefillPin) return;
+    const fetch = async () => {
       setLoading(true);
       try {
-        let found = null;
-        if (bType === "staff") {
-          found = await getStaffByStaffId(prefillId.trim());
-          if (found) found.borrowerType = "staff";
-        } else {
-          found = await getStudentByPin(prefillId.trim());
-          if (found) found.borrowerType = "student";
-        }
-        if (found) await confirmBorrower(found);
-        else { setStep(STEPS.ID); setIdValue(""); }
+        const found = await getStudentByPin(prefillPin.trim());
+        if (found) {
+          setStudent(found);
+          await loadIssuedBooks(found.id);
+          setStep(STEPS.BARCODE);
+        } else { setStep(STEPS.PIN); setPin(""); }
       } catch {}
       setLoading(false);
-    })();
-  }, [prefillId, bType]);
+    };
+    fetch();
+  }, [prefillPin]);
 
   useEffect(() => {
-    if (step === STEPS.BOOK) setTimeout(() => accessRef.current?.focus(), 150);
+    if (step === STEPS.BARCODE) setTimeout(() => barcodeRef.current?.focus(), 150);
   }, [step]);
 
-  const reset = () => {
-    setStep(STEPS.ID); setIdValue(""); setAccessCode("");
-    setBorrower(null); setBook(null); setTransaction(null);
-    setActiveIssues([]); setError(""); setScanner(null); setNotIssuedInfo(null);
-  };
-
-  // ── After finding borrower, check if they have active issues ────────
-  const confirmBorrower = async (found) => {
-    setBorrower(found);
-
-    // Fetch all transactions for this borrower
-    const txns = await getTransactionsByBorrower(found.id);
-    const active = txns.filter((t) => t.status === "issued");
-    setActiveIssues(active);
-
-    if (active.length === 0) {
-      // No active issues — stay on ID step, show message, block scan
-      setStep(STEPS.ID);
-    } else {
-      setStep(STEPS.BOOK);
+  // Load all currently issued books for this borrower
+  const loadIssuedBooks = async (borrowerId) => {
+    try {
+      const txns = await getTransactionsByBorrower(borrowerId);
+      setIssuedBooks(txns.filter(t => t.status === "issued"));
+    } catch {
+      setIssuedBooks([]);
     }
   };
 
-  // ── Step 1: Resolve ID ─────────────────────────────────────────────
-  const resolveId = async (value) => {
-    setError(""); setBorrower(null); setActiveIssues([]); setLoading(true);
+  // ── Full reset — clears everything including student ─────────────────
+  const resetAll = () => {
+    setStep(STEPS.PIN); setPin(""); setBarcode("");
+    setStudent(null);   setBook(null); setTransaction(null);
+    setIssuedBooks([]);  setError("");
+  };
+
+  // ── Book-only reset — keeps student, return another book ─────────────
+  const resetBookOnly = async () => {
+    setBarcode(""); setBook(null); setTransaction(null); setError("");
+    // Refresh the issued books list — one was just returned
+    if (student) await loadIssuedBooks(student.id);
+    setStep(STEPS.BARCODE);
+  };
+
+  // ── Back from BARCODE → PIN (keeps pin value, clears student) ────────
+  const goBackToPin = () => {
+    setBarcode(""); setBook(null); setTransaction(null);
+    setIssuedBooks([]); setError("");
+    setStep(STEPS.PIN);
+  };
+
+  const handlePinSubmit = async (e) => {
+    e.preventDefault(); setError(""); setLoading(true);
     try {
-      const trimmed = value.trim();
-      let found = await getStudentByPin(trimmed);
-      if (found) {
-        found.borrowerType = "student";
-      } else {
-        found = await getStaffByStaffId(trimmed);
-        if (found) found.borrowerType = "staff";
-      }
+      const found = await getStudentByPin(pin.trim());
       if (!found) {
-        setError("No student or staff found with this PIN / Staff ID. Please try again.");
-        setIdValue("");
+        setError("No student found with this PIN. Please check and try again.");
       } else {
-        await confirmBorrower(found);
+        setStudent(found);
+        await loadIssuedBooks(found.id);
+        setStep(STEPS.BARCODE);
       }
     } catch (err) { setError("Error: " + err.message); }
     setLoading(false);
   };
 
-  const handleIdSubmit = (e) => { e.preventDefault(); resolveId(idValue); };
-  const handleIdQRScan = (decoded) => {
-    setScanner(null); setIdValue(decoded);
-    setTimeout(() => resolveId(decoded), 100);
-  };
-
-  // ── Step 2: Resolve book ───────────────────────────────────────────
-  const resolveBook = async (code) => {
-    setError(""); setNotIssuedInfo(null); setLoading(true);
+  const handleBarcodeSubmit = async (e) => {
+    e.preventDefault(); setError(""); setLoading(true);
     try {
-      const foundBook = await getBookByBarcode(code.trim());
+      const foundBook = await getBookByBarcode(barcode.trim());
       if (!foundBook) {
-        setError("No book found with this access code. Please try again.");
-        setAccessCode("");
+        setError("No book found with this accession/barcode. Please try again.");
+        setBarcode(""); barcodeRef.current?.focus();
       } else {
-        const txn = await getActiveTransaction(borrower.id, foundBook.id);
+        const txn = await getActiveTransaction(student.id, foundBook.id);
         if (!txn) {
-          setNotIssuedInfo({
-            title:     foundBook.title,
-            author:    foundBook.author,
-            barcode:   foundBook.barcode || foundBook.accessionNo,
-            available: foundBook.available,
-          });
-          setAccessCode("");
+          setError(`"${foundBook.title}" is not currently issued to ${student.name}.`);
+          setBarcode(""); barcodeRef.current?.focus();
         } else {
-          setBook(foundBook);
-          setTransaction(txn);
-          setStep(STEPS.CONFIRM);
+          setBook(foundBook); setTransaction(txn); setStep(STEPS.CONFIRM);
         }
       }
     } catch (err) { setError("Error: " + err.message); }
     setLoading(false);
   };
 
-  const handleBookSubmit = (e) => { e.preventDefault(); resolveBook(accessCode); };
-  const handleBookQRScan = (decoded) => {
-    setScanner(null); setAccessCode(decoded);
-    setTimeout(() => resolveBook(decoded), 100);
+  // Click a book from the issued list to auto-fill the barcode
+  const handleIssuedBookClick = (txn) => {
+    setBarcode(txn.barcode || ""); setError("");
+    setTimeout(() => barcodeRef.current?.focus(), 100);
   };
 
-  // ── Step 3: Confirm ────────────────────────────────────────────────
   const handleConfirm = async () => {
     setLoading(true);
     try {
@@ -153,329 +132,200 @@ export default function ReturnBook() {
   const issuedDate = transaction?.issueDate?.toDate
     ? transaction.issueDate.toDate().toLocaleDateString("en-IN") : "—";
 
-  const allSteps = [
-    { key: STEPS.ID,      label: "1. Scan / Enter ID" },
-    { key: STEPS.BOOK,    label: "2. Book Code" },
-    { key: STEPS.CONFIRM, label: "3. Confirm" },
-  ];
-  const currentIdx = allSteps.findIndex((s) => s.key === step);
+  const daysHeld = transaction?.issueDate?.toDate
+    ? Math.floor((Date.now() - transaction.issueDate.toDate()) / 86400000) : null;
 
-  const borrowerSubtitle = borrower
-    ? borrower.borrowerType === "staff"
-      ? `${borrower.staffId} · ${borrower.designation} · ${borrower.section}`
-      : `${borrower.pin} · ${borrower.branch}`
-    : "";
-
-  // Has borrower been identified but has no active books?
-  const borrowerFoundNoBooks = borrower && activeIssues.length === 0 && step === STEPS.ID;
+  const ACTIVE       = { background: "linear-gradient(135deg, #0D1F4E, #1B4332)" };
+  const ORANGE_GRAD  = { background: "linear-gradient(135deg, #c2410c, #ea580c)" };
 
   return (
     <AdminLayout>
-      {scanner === "id" && (
-        <QRScannerModal
-          title="Scan Student PIN / Staff ID QR"
-          onScan={handleIdQRScan}
-          onClose={() => setScanner(null)}
-        />
-      )}
-      {scanner === "book" && (
-        <QRScannerModal
-          title="Scan Book QR Code"
-          onScan={handleBookQRScan}
-          onClose={() => setScanner(null)}
-        />
-      )}
-
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-800">Return Book</h1>
-        <p className="text-gray-500 text-sm mt-1">Scan ID → Scan Book → Confirm</p>
+        <p className="text-gray-500 text-sm mt-1">
+          Enter student PIN, then scan or type the book accession number.
+        </p>
       </div>
 
-      {/* Step indicator */}
-      <div className="flex items-center gap-1 mb-8 flex-wrap">
-        {allSteps.map(({ key, label }, i) => (
-          <div key={key} className="flex items-center gap-1">
-            <span className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${
-              step === key
-                ? "bg-orange-500 text-white"
-                : step === STEPS.SUCCESS || currentIdx > i
-                  ? "bg-green-100 text-green-700"
-                  : "bg-gray-100 text-gray-400"
-            }`}>{label}</span>
-            {i < allSteps.length - 1 && <span className="text-gray-300 text-xs">→</span>}
+      {/* Step Indicator */}
+      <div className="flex items-center gap-2 mb-8 flex-wrap">
+        {[
+          { key: STEPS.PIN,     label: "1. Student PIN"  },
+          { key: STEPS.BARCODE, label: "2. Book Accession"},
+          { key: STEPS.CONFIRM, label: "3. Confirm"       },
+        ].map(({ key, label }, i, arr) => (
+          <div key={key} className="flex items-center gap-2">
+            <span
+              className={`px-4 py-1.5 rounded-full text-xs font-semibold ${
+                step === key
+                  ? "text-white"
+                  : step === STEPS.SUCCESS || arr.findIndex(a => a.key === step) > i
+                    ? "bg-green-100 text-green-700"
+                    : "bg-gray-100 text-gray-400"
+              }`}
+              style={step === key ? ORANGE_GRAD : {}}>
+              {label}
+            </span>
+            {i < arr.length - 1 && <span className="text-gray-300 text-sm">→</span>}
           </div>
         ))}
       </div>
 
-      <div className="max-w-lg space-y-4">
+      <div className="max-w-lg">
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3 flex items-start gap-2">
-            <span className="flex-shrink-0 mt-0.5">⚠️</span>
-            <span>{error}</span>
+          <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-3 mb-4">
+            {error}
           </div>
         )}
 
-        {/* ── STEP 1: ID INPUT ── */}
-        {step === STEPS.ID && !borrowerFoundNoBooks && (
+        {/* ── STEP 1: PIN ── */}
+        {step === STEPS.PIN && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-1">Student PIN or Staff ID</h2>
-            <p className="text-sm text-gray-400 mb-5">
-              Scan their QR card or enter the PIN / CMS ID manually.
-            </p>
-
-            <button
-              type="button"
-              onClick={() => { setError(""); setBorrower(null); setActiveIssues([]); setScanner("id"); }}
-              className="w-full mb-4 py-5 border-2 border-dashed border-orange-300 hover:border-orange-500 hover:bg-orange-50 rounded-xl font-semibold text-orange-600 transition flex flex-col items-center gap-2 text-sm"
-            >
-              <span className="text-3xl">📷</span>
-              <span>Scan QR Card</span>
-              <span className="text-xs text-orange-400 font-normal">Student PIN card or Staff ID card</span>
-            </button>
-
-            <div className="flex items-center gap-3 mb-5">
-              <div className="h-px flex-1 bg-gray-200" />
-              <span className="text-xs text-gray-400">or enter manually</span>
-              <div className="h-px flex-1 bg-gray-200" />
-            </div>
-
-            <form onSubmit={handleIdSubmit} className="space-y-4">
+            <h2 className="text-lg font-semibold text-gray-800 mb-1">Enter Student PIN</h2>
+            <p className="text-sm text-gray-400 mb-5">Ask the student for their PIN number.</p>
+            <form onSubmit={handlePinSubmit} className="space-y-4">
               <input
-                type="text"
-                autoFocus
-                required
-                value={idValue}
-                onChange={(e) => { setIdValue(e.target.value); setBorrower(null); setActiveIssues([]); }}
-                placeholder="PIN: 23173-CM-001  or  Staff ID: 14023738"
-                className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base font-mono text-center focus:outline-none focus:ring-2 focus:ring-orange-400"
+                type="text" autoFocus required value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                placeholder="e.g. 23173-CM-001"
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-xl font-mono tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-orange-400"
               />
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white py-3 rounded-xl font-bold transition"
-              >
-                {loading ? "Searching..." : "Find Borrower →"}
+              <button type="submit" disabled={loading}
+                className="w-full text-white py-3 rounded-lg font-semibold transition disabled:opacity-50"
+                style={ORANGE_GRAD}>
+                {loading ? "Searching..." : "Find Student →"}
               </button>
             </form>
           </div>
         )}
 
-        {/* ── NO BOOKS ISSUED — Block scan, show message ── */}
-        {borrowerFoundNoBooks && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            {/* Borrower info bar */}
-            <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100"
-              style={{ background: "linear-gradient(135deg, #0D1F4E08, #1B433208)" }}>
-              <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white text-sm flex-shrink-0"
-                style={{ background: "linear-gradient(135deg, #0D1F4E, #1B4332)" }}>
-                {borrower.name?.charAt(0)}
-              </div>
-              <div>
-                <p className="font-bold text-gray-800 text-sm">{borrower.name}</p>
-                <p className="text-xs text-gray-500 font-mono">{borrowerSubtitle}</p>
-              </div>
-              <span className="ml-auto">
-                <span className="bg-blue-50 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-full">
-                  {borrower.borrowerType === "staff" ? "Staff" : "Student"}
-                </span>
-              </span>
-            </div>
-
-            {/* No books message */}
-            <div className="p-8 text-center">
-              <div className="w-20 h-20 rounded-full bg-gray-50 flex items-center justify-center text-4xl mx-auto mb-4">
-                📭
-              </div>
-              <h3 className="text-lg font-bold text-gray-800 mb-2">No Books Currently Issued</h3>
-              <p className="text-gray-500 text-sm mb-1">
-                <span className="font-semibold text-gray-700">{borrower.name}</span> has not taken any books from the library.
-              </p>
-              <p className="text-gray-400 text-xs mb-6">
-                There is nothing to return at this time.
-              </p>
-
-              {/* Summary of all-time borrows if any */}
-              <div className="bg-gray-50 rounded-xl p-4 mb-6 text-left">
-                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">
-                  Borrow History
-                </p>
-                <p className="text-sm text-gray-600">
-                  Total books ever borrowed:{" "}
-                  <span className="font-bold text-gray-800">
-                    {/* We only have activeIssues here; history needs separate fetch */}
-                    0 currently active
-                  </span>
-                </p>
-                <p className="text-xs text-gray-400 mt-1">
-                  Check the Reports page for full transaction history.
-                </p>
-              </div>
-
-              <button
-                onClick={reset}
-                className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-xl font-bold transition"
-              >
-                ← Try a Different ID
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── STEP 2: BOOK CODE ── */}
-        {step === STEPS.BOOK && borrower && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            {/* Borrower confirmed + active books list */}
-            <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-white text-sm flex-shrink-0"
-                  style={{ background: "linear-gradient(135deg, #0D1F4E, #1B4332)" }}>
-                  {borrower.name?.charAt(0)}
+        {/* ── STEP 2: BARCODE ── */}
+        {step === STEPS.BARCODE && student && (
+          <div className="space-y-4">
+            {/* Student confirmed banner */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                  style={ORANGE_GRAD}>{student.name?.charAt(0)}</div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-gray-800">{student.name}</p>
+                  <p className="text-xs text-gray-500 font-mono">PIN: {student.pin} · {student.branch}</p>
                 </div>
+                <button onClick={goBackToPin}
+                  className="text-xs text-gray-400 hover:text-gray-600 underline flex-shrink-0">
+                  Change
+                </button>
+              </div>
+
+              {/* Currently issued books for this student */}
+              {issuedBooks.length > 0 ? (
                 <div>
-                  <p className="text-sm font-bold text-green-800">{borrower.name}</p>
-                  <p className="text-xs text-green-600 font-mono">{borrowerSubtitle}</p>
-                </div>
-                <span className="ml-auto text-green-500 text-xl">✓</span>
-              </div>
-
-              {/* List of currently issued books */}
-              <div className="border-t border-green-100 pt-3">
-                <p className="text-xs font-bold text-green-700 mb-2">
-                  📚 {activeIssues.length} book{activeIssues.length > 1 ? "s" : ""} currently issued:
-                </p>
-                <div className="space-y-1.5">
-                  {activeIssues.map((t) => (
-                    <div key={t.id}
-                      className="flex items-center justify-between bg-white/70 rounded-lg px-3 py-2">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold text-gray-800 truncate">{t.bookTitle}</p>
-                        <p className="text-xs text-gray-400 font-mono">{t.barcode}</p>
-                      </div>
-                      {t.issueDate?.toDate && (() => {
-                        const days = Math.floor((Date.now() - t.issueDate.toDate()) / 86400000);
-                        return (
-                          <span className={`text-xs ml-2 flex-shrink-0 font-medium ${
-                            days > 14 ? "text-red-600" : "text-gray-400"
-                          }`}>
-                            {days}d {days > 14 ? "⚠️" : ""}
-                          </span>
-                        );
-                      })()}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Not-issued error card */}
-            {notIssuedInfo && (
-              <div className="mb-5 bg-red-50 border-2 border-red-200 rounded-xl p-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center text-xl flex-shrink-0">🚫</div>
-                  <div className="flex-1">
-                    <p className="font-bold text-red-700 text-sm mb-1">
-                      This book is NOT issued to {borrower.name}
-                    </p>
-                    <p className="text-red-600 font-semibold text-sm">{notIssuedInfo.title}</p>
-                    <p className="text-xs text-red-400 mt-0.5">{notIssuedInfo.author} · {notIssuedInfo.barcode}</p>
-                    <span className={`inline-block mt-2 px-2.5 py-1 rounded-full text-xs font-bold ${
-                      notIssuedInfo.available
-                        ? "bg-green-100 text-green-700"
-                        : "bg-amber-100 text-amber-700"
-                    }`}>
-                      {notIssuedInfo.available
-                        ? "✓ This book is available (not issued to anyone)"
-                        : "⚠️ Issued to a different borrower"}
-                    </span>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">
+                    Currently Issued ({issuedBooks.length}) — tap to auto-fill
+                  </p>
+                  <div className="space-y-2">
+                    {issuedBooks.map((txn) => {
+                      const days = txn.issueDate?.toDate
+                        ? Math.floor((Date.now() - txn.issueDate.toDate()) / 86400000) : null;
+                      return (
+                        <button key={txn.id}
+                          onClick={() => handleIssuedBookClick(txn)}
+                          className="w-full text-left bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg px-3 py-2.5 transition">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-gray-800 truncate">{txn.bookTitle}</p>
+                            {days !== null && (
+                              <span className={`text-xs font-bold flex-shrink-0 ${days > 14 ? "text-red-500" : "text-gray-400"}`}>
+                                {days}d {days > 14 ? "⚠️" : ""}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500 font-mono mt-0.5">{txn.barcode}</p>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-                <button onClick={() => setNotIssuedInfo(null)}
-                  className="mt-3 w-full text-xs text-red-600 border border-red-200 hover:bg-red-100 py-2 rounded-lg transition font-medium">
-                  Try a Different Book
-                </button>
-              </div>
-            )}
-
-            <h2 className="text-lg font-semibold text-gray-800 mb-1">Scan Book to Return</h2>
-            <p className="text-sm text-gray-400 mb-5">
-              Scan the QR on the book being returned, or enter the accession number.
-            </p>
-
-            <button type="button"
-              onClick={() => { setError(""); setNotIssuedInfo(null); setScanner("book"); }}
-              className="w-full mb-4 py-5 border-2 border-dashed border-orange-300 hover:border-orange-500 hover:bg-orange-50 rounded-xl font-semibold text-orange-600 transition flex flex-col items-center gap-2 text-sm">
-              <span className="text-3xl">📷</span>
-              <span>Scan Book QR Code</span>
-              <span className="text-xs text-orange-400 font-normal">QR sticker on the book</span>
-            </button>
-
-            <div className="flex items-center gap-3 mb-5">
-              <div className="h-px flex-1 bg-gray-200" />
-              <span className="text-xs text-gray-400">or enter manually</span>
-              <div className="h-px flex-1 bg-gray-200" />
+              ) : (
+                <div className="bg-gray-50 rounded-lg px-4 py-3 text-center">
+                  <p className="text-sm text-gray-500">⚠️ No books currently issued to this student.</p>
+                  <button onClick={goBackToPin}
+                    className="mt-2 text-xs text-blue-600 hover:underline">Try a different student</button>
+                </div>
+              )}
             </div>
 
-            <form onSubmit={handleBookSubmit} className="space-y-4">
-              <input ref={accessRef} type="text" required value={accessCode}
-                onChange={(e) => { setAccessCode(e.target.value); setNotIssuedInfo(null); }}
-                placeholder="e.g. 1234 or BB-001"
-                className="w-full border border-gray-300 rounded-xl px-4 py-3 text-xl font-mono text-center focus:outline-none focus:ring-2 focus:ring-orange-400" />
-              <div className="flex gap-3">
-                <button type="button" onClick={reset}
-                  className="flex-1 border border-gray-200 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-50 transition">
-                  ← Back
-                </button>
-                <button type="submit" disabled={loading}
-                  className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white py-3 rounded-xl font-bold transition">
-                  {loading ? "Searching..." : "Find Book →"}
-                </button>
-              </div>
-            </form>
+            {/* Barcode input */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+              <h2 className="text-base font-semibold text-gray-800 mb-1">Scan / Enter Book Accession</h2>
+              <p className="text-sm text-gray-400 mb-4">
+                Scan the book QR/barcode, or tap a book above to auto-fill.
+              </p>
+              <form onSubmit={handleBarcodeSubmit} className="space-y-3">
+                <div className="relative">
+                  <input
+                    ref={barcodeRef} type="text" required value={barcode}
+                    onChange={(e) => setBarcode(e.target.value)}
+                    placeholder="Scan or type accession no."
+                    className="w-full border-2 border-orange-400 rounded-lg px-4 py-3 text-lg font-mono text-center focus:outline-none focus:ring-2 focus:ring-orange-400"
+                  />
+                  <span className="absolute right-4 top-3.5 text-gray-300 text-xl">📷</span>
+                </div>
+                <div className="flex gap-3">
+                  <button type="button" onClick={goBackToPin}
+                    className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-lg font-medium hover:bg-gray-50 transition">
+                    ← Back
+                  </button>
+                  <button type="submit" disabled={loading || issuedBooks.length === 0}
+                    className="flex-1 text-white py-3 rounded-lg font-semibold transition disabled:opacity-50"
+                    style={ORANGE_GRAD}>
+                    {loading ? "Searching..." : "Find Book →"}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
 
         {/* ── STEP 3: CONFIRM ── */}
-        {step === STEPS.CONFIRM && borrower && book && (
+        {step === STEPS.CONFIRM && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-5">Confirm Return</h2>
             <div className="bg-gray-50 rounded-xl p-5 mb-6 space-y-4">
-              <div className="flex items-center gap-4">
-                <div className="w-11 h-11 rounded-full flex items-center justify-center font-bold text-white flex-shrink-0"
-                  style={{ background: "linear-gradient(135deg, #0D1F4E, #1B4332)" }}>
-                  {borrower.name?.charAt(0)}
-                </div>
+              <div className="flex items-start gap-3">
+                <span className="text-2xl">🎓</span>
                 <div>
-                  <p className="text-xs text-gray-400 font-semibold uppercase">
-                    {borrower.borrowerType === "staff" ? "Staff Member" : "Student"}
-                  </p>
-                  <p className="font-bold text-gray-800">{borrower.name}</p>
-                  <p className="text-xs text-gray-500 font-mono">{borrowerSubtitle}</p>
+                  <p className="text-xs text-gray-400 uppercase font-semibold">Student</p>
+                  <p className="font-bold text-gray-800">{student.name}</p>
+                  <p className="text-sm text-gray-500">PIN: {student.pin} · {student.branch}</p>
                 </div>
               </div>
               <div className="border-t border-gray-200" />
-              <div className="flex items-center gap-4">
-                <div className="w-11 h-11 rounded-xl bg-orange-50 flex items-center justify-center text-2xl flex-shrink-0">📚</div>
+              <div className="flex items-start gap-3">
+                <span className="text-2xl">📚</span>
                 <div>
-                  <p className="text-xs text-gray-400 font-semibold uppercase">Returning</p>
+                  <p className="text-xs text-gray-400 uppercase font-semibold">Returning</p>
                   <p className="font-bold text-gray-800">{book.title}</p>
-                  <p className="text-xs text-gray-500">
-                    {book.author} · <span className="font-mono">{book.barcode || book.accessionNo}</span>
-                  </p>
+                  <p className="text-sm text-gray-500">{book.author}</p>
                 </div>
               </div>
               <div className="border-t border-gray-200" />
-              <p className="text-sm text-gray-500">
-                📅 Originally issued: <span className="font-semibold text-gray-700">{issuedDate}</span>
-              </p>
+              <div className="flex items-center gap-3 text-sm text-gray-500 flex-wrap">
+                <span>📅 Issued: <span className="font-semibold text-gray-700">{issuedDate}</span></span>
+                {daysHeld !== null && (
+                  <span className={`font-semibold ${daysHeld > 14 ? "text-red-500" : "text-gray-500"}`}>
+                    · {daysHeld} day{daysHeld !== 1 ? "s" : ""} held {daysHeld > 14 ? "⚠️" : ""}
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex gap-3">
-              <button
-                onClick={() => { setStep(STEPS.BOOK); setAccessCode(""); setBook(null); setTransaction(null); setError(""); setNotIssuedInfo(null); }}
-                className="flex-1 border border-gray-200 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-50 transition">
+              <button onClick={() => { setStep(STEPS.BARCODE); setBarcode(""); setBook(null); setTransaction(null); setError(""); }}
+                className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-lg font-medium hover:bg-gray-50 transition">
                 ← Back
               </button>
               <button onClick={handleConfirm} disabled={loading}
-                className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white py-3 rounded-xl font-bold transition">
+                className="flex-1 text-white py-3 rounded-lg font-semibold transition disabled:opacity-50"
+                style={{ background: "linear-gradient(135deg, #15803d, #166534)" }}>
                 {loading ? "Saving..." : "✓ Confirm Return"}
               </button>
             </div>
@@ -483,21 +333,42 @@ export default function ReturnBook() {
         )}
 
         {/* ── SUCCESS ── */}
-        {step === STEPS.SUCCESS && borrower && book && (
+        {step === STEPS.SUCCESS && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center">
-            <div className="w-20 h-20 rounded-full bg-green-50 flex items-center justify-center text-4xl mx-auto mb-4">📗</div>
+            <div className="text-6xl mb-4">📗</div>
             <h2 className="text-xl font-bold text-gray-800 mb-2">Book Returned!</h2>
             <p className="text-gray-500 text-sm mb-1">
               <span className="font-bold text-gray-700">{book.title}</span>
+              {" "}returned by{" "}
+              <span className="font-bold text-gray-700">{student.name}</span>
             </p>
-            <p className="text-gray-400 text-sm mb-6">
-              returned by <span className="font-bold text-gray-700">{borrower.name}</span>
+            <p className="text-gray-400 text-xs mb-8">
+              Transaction updated · Book marked available
             </p>
-            <p className="text-gray-400 text-xs mb-8">Transaction updated · Book now available</p>
-            <button onClick={reset}
-              className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-xl font-bold transition">
-              Return Another Book
-            </button>
+
+            {/* ── Two action buttons ── */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Return ANOTHER book for the SAME student — skip PIN re-entry */}
+              <button
+                onClick={resetBookOnly}
+                className="flex-1 text-white py-3 rounded-xl font-bold text-sm transition"
+                style={ORANGE_GRAD}>
+                ↩️ Return Another Book
+                <span className="block text-xs opacity-75 font-normal mt-0.5">
+                  Same student · {student.name}
+                </span>
+              </button>
+
+              {/* Full reset — go back to PIN step */}
+              <button
+                onClick={resetAll}
+                className="flex-1 border-2 border-gray-300 text-gray-600 hover:bg-gray-50 py-3 rounded-xl font-bold text-sm transition">
+                👤 New Student
+                <span className="block text-xs text-gray-400 font-normal mt-0.5">
+                  Start with a different PIN
+                </span>
+              </button>
+            </div>
           </div>
         )}
       </div>
